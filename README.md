@@ -8,6 +8,7 @@ You can freely use NostrSharp in any kind of projects you want.
 > **IMPORTANT!**
 > **This library is not yet tested enough for a production environment. Feel free to try it, send feedback and contribute.**
 
+Download the package from [Nuget](https://www.nuget.org/packages/NostrSharp) or search it by typing NostrSharp.
 
 This library is meant to provide necessary tools to build your own nostr-based software
 It's usable both on desktop/mobile and web environments.
