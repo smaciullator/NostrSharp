@@ -1,19 +1,30 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net6</TargetFramework>
     <Nullable>enable</Nullable>
+    <Title>A library that provide a set of tools for Nostr developement</Title>
+    <Authors>smaciullator</Authors>
+    <Description>A library that provide a set of tools for Nostr developement</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <RepositoryUrl>https://github.com/smaciullator/NostrSharp</RepositoryUrl>
+    <PackageTags>nostr;client;</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <GeneratePackageOnBuild>False</GeneratePackageOnBuild>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\README.md">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="BTCPayServer.Lightning.All" Version="1.4.31" />
     <PackageReference Include="BTCPayServer.Lightning.Common" Version="1.3.21" />
     <PackageReference Include="NBitcoin.Secp256k1" Version="3.1.1" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="..\..\..\Toolbox\Toolbox\Toolbox.csproj" />
   </ItemGroup>
 
 </Project>
