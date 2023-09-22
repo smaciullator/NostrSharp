@@ -30,9 +30,10 @@ namespace NostrSharp
 
 
         public event EventHandler<Uri> OnInitialConnectionEstablished;
+        public event EventHandler<Uri, string> OnConnectionClosed;
 
         public event EventHandler<Uri, RelayNIP11Metadata> OnRelayMetadata;
-        public event EventHandler<Uri, string?> OnAuthRequest;
+        public event EventHandler<Uri, string?> OnAuthResponse;
         public event EventHandler<Uri, CountResult> OnCount;
         public event EventHandler<Uri, UserMetadata?, NEvent> OnMetadata;
         public event EventHandler<Uri, NEvent> OnShortTextNote;
@@ -64,8 +65,6 @@ namespace NostrSharp
 
 
         public NSMultiRelay Relays { get; private set; } = new();
-        public Dictionary<Uri, bool> RelaysStatus { get; private set; } = new();
-        public Dictionary<Uri, Guid> RelaysSubscriptionId { get; private set; } = new();
 
 
         private List<RelayInfo> UserRelaysInfo { get; set; } = new();
@@ -73,7 +72,10 @@ namespace NostrSharp
         private static SemaphoreSlim _semaphore { get; set; } = new SemaphoreSlim(1);
 
 
-        public NSMain() { }
+        public NSMain()
+        {
+            AttachEvents();
+        }
 
 
         /// <summary>
@@ -157,54 +159,55 @@ namespace NostrSharp
         }
 
 
-        public async Task<List<Uri>?> ConnectRelays(List<NSRelayConfig> relays)
+        public async Task<List<Uri>> ConnectRelays(List<NSRelayConfig> relays)
         {
-            relays.RemoveAll(x => Relays.RunningRelays.Any(y => y == x.Uri));
-            if (relays.Count == 0)
-                return null;
-            Relays = new NSMultiRelay(relays);
-
-            RelaysStatus.Clear();
-            foreach (NSRelayConfig cfg in relays)
-                RelaysStatus.TryAdd(cfg.Uri, false);
-
-            AttachEvents();
-            return await Relays.RunAll();
+            List<Uri> nonRunningRelays = new();
+            foreach (NSRelayConfig relay in relays)
+                if (!await ConnectRelay(relay))
+                    nonRunningRelays.Add(relay.Uri);
+            return nonRunningRelays;
         }
-        public async Task<List<Uri>> DisconnectRelays()
+        public async Task<bool> ConnectRelay(NSRelayConfig relay)
         {
-            List<Uri> errors = new();
-            foreach (Uri relayUri in Relays.RunningRelays)
-                if (!await DisconnectRelay(relayUri))
-                    errors.Add(relayUri);
-            return errors;
+            if (Relays.RunningRelays.Any(x => x.Configurations.Uri == relay.Uri))
+                return true;
+
+            Relays.AddRelay(relay);
+            return await Relays.Run(relay.Uri);
+        }
+
+        public async Task<List<Uri>> DisconnectRelays(CancellationToken? token = null)
+        {
+            await Relays.SendClose(new NRequestClose(""), token);
+            return await Relays.StopAll();
         }
         public async Task<bool> DisconnectRelay(Uri relayUri)
         {
-            if (!IsRelayRunning(relayUri))
-                return false;
-            if (RelaysSubscriptionId.ContainsKey(relayUri))
-                await Relays.SendClose(relayUri, new NRequestClose(RelaysSubscriptionId[relayUri].ToString()));
+            await Relays.SendClose(relayUri, new NRequestClose(""));
             return await Relays.Stop(relayUri);
         }
-        public bool AddRelay(Uri relayUri)
+
+        public async Task<List<Uri>> ReconnectRelays(CancellationToken? token = null)
         {
-            return Relays.AddRelay(new NSRelayConfig(relayUri));
+            List<NSRelayConfig> relaysToReconnect = new List<Uri>(Relays.RelaysUri).Select(x => new NSRelayConfig(x)).ToList();
+            await DisconnectRelays(token);
+            return await ConnectRelays(relaysToReconnect);
         }
-        public bool IsRelayConnected(Uri relayUri)
+        public async Task<bool> ReconnectRelay(Uri relayUri)
         {
-            if (RelaysStatus.ContainsKey(relayUri))
-                return RelaysStatus[relayUri];
-            return false;
+            await DisconnectRelay(relayUri);
+            return await ConnectRelay(new(relayUri));
         }
+
+
         public bool IsRelayRunning(Uri relayUri)
         {
-            if (Relays.RunningRelays.Contains(relayUri))
-                return RelaysStatus[relayUri];
-            return false;
+            return Relays.RunningRelaysUri.Any(x => x == relayUri);
         }
-
-
+        public bool IsRelayNotRunning(Uri relayUri)
+        {
+            return Relays.NonRunningRelaysUri.Any(x => x == relayUri);
+        }
         public RelayPermissions? GetRelayPermissions(Uri relayUri)
         {
             RelayInfo? permissions = UserRelaysInfo.FirstOrDefault(x => x.RelayUri == relayUri.ToString());
@@ -220,81 +223,58 @@ namespace NostrSharp
                 return false;
 
             NEvent authEvent = NSEventMaker.Authentication(relayUri, challengeString);
-            if (!IsRelayRunning(relayUri) || !authEvent.Sign(nSec))
+            if (!authEvent.Sign(nSec))
                 return false;
             return await Relays.SendAuthentication(relayUri, new NRequestAuth(authEvent), token);
         }
-        public async Task<List<Uri>> SendFilter(NSRelayFilter filters, CancellationToken? token = null)
-        {
-            List<Uri> errors = new();
-            foreach (Uri relayUri in Relays.RunningRelays)
-                if (!await SendFilter(relayUri, filters, token))
-                    errors.Add(relayUri);
-            return errors;
-        }
-        public async Task<bool> SendFilter(Uri relayUri, NSRelayFilter filters, CancellationToken? token = null)
-        {
-            if (!IsRelayRunning(relayUri))
-                return false;
-            try
-            {
-                _semaphore.Wait();
-                if (!RelaysSubscriptionId.ContainsKey(relayUri))
-                    RelaysSubscriptionId.TryAdd(relayUri, Guid.NewGuid());
-                string subId = RelaysSubscriptionId[relayUri].ToString();
-                _semaphore.Release();
-                return await Relays.SendFilter(relayUri, new NRequestReq(subId, filters), token);
-            }
-            catch (Exception ex)
-            {
-                _semaphore.Release();
-                return false;
-            }
-        }
-        public async Task<List<Uri>> SendCount(NSRelayFilter filters, CancellationToken? token = null)
-        {
-            List<Uri> errors = new();
-            foreach (Uri relayUri in Relays.RunningRelays)
-                if (!await SendCount(relayUri, filters, token))
-                    errors.Add(relayUri);
-            return errors;
-        }
-        public async Task<bool> SendCount(Uri relayUri, NSRelayFilter filters, CancellationToken? token = null)
-        {
-            if (!IsRelayRunning(relayUri))
-                return false;
-            try
-            {
-                _semaphore.Wait();
-                if (!RelaysSubscriptionId.ContainsKey(relayUri))
-                    RelaysSubscriptionId.TryAdd(relayUri, Guid.NewGuid());
-                string subId = RelaysSubscriptionId[relayUri].ToString();
-                _semaphore.Release();
-                return await Relays.SendCountFilter(relayUri, new NRequestCount(subId, filters), token);
-            }
-            catch (Exception ex)
-            {
-                _semaphore.Release();
-                return false;
-            }
-        }
+
         public async Task<List<Uri>> SendEvent(NEvent ev, CancellationToken? token = null)
         {
             List<Uri> errors = new();
-            foreach (Uri relayUri in Relays.RunningRelays)
-                if (!await SendEvent(relayUri, ev, token))
-                    errors.Add(relayUri);
+            foreach (NSRelay relay in Relays.RunningRelays)
+                if (!await SendEvent(relay.Configurations.Uri, ev, token))
+                    errors.Add(relay.Configurations.Uri);
             return errors;
         }
         public async Task<bool> SendEvent(Uri relayUri, NEvent ev, CancellationToken? token = null)
         {
             if (!TryGetNSec(out NSec? nSec) || nSec is null)
                 return false;
+            if (!ev.Signed && !ev.Sign(nSec))
+                return false;
 
             RelayPermissions? permissions = GetRelayPermissions(relayUri);
-            if (!IsRelayRunning(relayUri) || !ev.Sign(nSec) || (permissions is not null && !permissions.Write))
+            if (permissions is not null && !permissions.Write)
                 return false;
+
             return await Relays.SendEvent(relayUri, new NRequestEvent(ev), token);
+        }
+
+        public async Task<List<Uri>> SendFilter(NSRelayFilter filters, CancellationToken? token = null)
+        {
+            return await Relays.SendFilter(new NRequestReq("", filters), token);
+        }
+        public async Task<bool> SendFilter(Uri relayUri, NSRelayFilter filters, CancellationToken? token = null)
+        {
+            return await Relays.SendFilter(relayUri, new NRequestReq("", filters), token);
+        }
+
+        public async Task<List<Uri>> SendCount(NSRelayFilter filters, CancellationToken? token = null)
+        {
+            return await Relays.SendCount(new NRequestCount("", filters), token);
+        }
+        public async Task<bool> SendCount(Uri relayUri, NSRelayFilter filters, CancellationToken? token = null)
+        {
+            return await Relays.SendCount(relayUri, new NRequestCount("", filters), token);
+        }
+
+        public async Task<List<Uri>> SendClose(CancellationToken? token = null)
+        {
+            return await Relays.SendClose(new NRequestClose(""), token);
+        }
+        public async Task<bool> SendClose(Uri relayUri, CancellationToken? token = null)
+        {
+            return await Relays.SendClose(relayUri, new NRequestClose(""), token);
         }
 
 
@@ -302,7 +282,7 @@ namespace NostrSharp
         public async Task<List<Uri>> GetMyMetadata(Uri? relayUri = null, CancellationToken? token = null)
         {
             if (!TryGetNPub(out NPub? nPub) || nPub is null)
-                return relayUri is null ? new(Relays.RunningRelays) : new() { relayUri };
+                return relayUri is null ? new(Relays.RunningRelaysUri) : new() { relayUri };
             return await GetPubkeyMetadata(nPub.Hex, relayUri, token);
         }
         public async Task<List<Uri>> GetPubkeyMetadata(string pubkeyHex, Uri? relayUri = null, CancellationToken? token = null)
@@ -317,7 +297,7 @@ namespace NostrSharp
         public async Task<List<Uri>> GetMyContacts(Uri? relayUri = null, CancellationToken? token = null)
         {
             if (!TryGetNPub(out NPub? nPub) || nPub is null)
-                return relayUri is null ? new(Relays.RunningRelays) : new() { relayUri };
+                return relayUri is null ? new(Relays.RunningRelaysUri) : new() { relayUri };
             return await GetPubkeyContacts(nPub.Hex, relayUri, token);
         }
         public async Task<List<Uri>> GetPubkeyContacts(string pubkeyHex, Uri? relayUri = null, CancellationToken? token = null)
@@ -336,7 +316,7 @@ namespace NostrSharp
         public async Task<List<Uri>> GetMyShortTextNotes(DateTime? startFrom = null, DateTime? endAt = null, Uri? relayUri = null, CancellationToken? token = null)
         {
             if (!TryGetNPub(out NPub? nPub) || nPub is null)
-                return relayUri is null ? new(Relays.RunningRelays) : new() { relayUri };
+                return relayUri is null ? new(Relays.RunningRelaysUri) : new() { relayUri };
             return await GetContactShortTextNotes(nPub.Hex, startFrom, endAt, relayUri, token);
         }
         public async Task<List<Uri>> GetContactShortTextNotes(string pubkeyHex, DateTime? startFrom = null, DateTime? endAt = null, Uri? relayUri = null, CancellationToken? token = null)
@@ -356,7 +336,7 @@ namespace NostrSharp
         public async Task<List<Uri>> GetMyReservedNotes(DateTime? startFrom = null, DateTime? endAt = null, Uri? relayUri = null, CancellationToken? token = null)
         {
             if (!TryGetNPub(out NPub? nPub) || nPub is null)
-                return relayUri is null ? new(Relays.RunningRelays) : new() { relayUri };
+                return relayUri is null ? new(Relays.RunningRelaysUri) : new() { relayUri };
             return await GetContactReservedNotes(nPub.Hex, startFrom, endAt, relayUri, token);
         }
         public async Task<List<Uri>> GetContactReservedNotes(string pubkeyHex, DateTime? startFrom = null, DateTime? endAt = null, Uri? relayUri = null, CancellationToken? token = null)
@@ -490,7 +470,7 @@ namespace NostrSharp
                     return false;
 
                 Uri wcRelayUri = new Uri(WCParams.RelayUrl);
-                if (!AddRelay(wcRelayUri))
+                if (!await ConnectRelay(new(wcRelayUri)))
                     return false;
 
                 return await SendEvent(wcRelayUri, walletRequest, token);
@@ -506,31 +486,19 @@ namespace NostrSharp
         #region Events
         private void Relay_OnInitialConnectionEstablished(Uri relayUri)
         {
-            RelaysStatus[relayUri] = true;
             OnInitialConnectionEstablished?.Invoke(relayUri);
         }
-        private void OnConnectionClosed(Uri relayUri, string reason)
+        private void Relay_OnConnectionClosed(Uri relayUri, string reason)
         {
-            RelaysStatus[relayUri] = false;
-            try
-            {
-                _semaphore.Wait();
-                if (RelaysSubscriptionId.ContainsKey(relayUri))
-                    RelaysSubscriptionId.Remove(relayUri);
-                _semaphore.Release();
-            }
-            catch (Exception ex)
-            {
-                _semaphore.Release();
-            }
+            OnConnectionClosed?.Invoke(relayUri, reason);
         }
         private void Relays_OnRelayMetadata(Uri relayUrl, RelayNIP11Metadata nip11Metadata)
         {
             OnRelayMetadata?.Invoke(relayUrl, nip11Metadata);
         }
-        private void Relays_OnAuthRequest(Uri relayUri, NResponseAuth auth)
+        private void Relays_OnAuthResponse(Uri relayUri, NResponseAuth auth)
         {
-            OnAuthRequest?.Invoke(relayUri, auth.ChallengeString);
+            OnAuthResponse?.Invoke(relayUri, auth.ChallengeString);
         }
         private void OnEventReceived(Uri relayUri, NResponseEvent ev)
         {
@@ -612,8 +580,8 @@ namespace NostrSharp
         private void AttachEvents()
         {
             Relays.OnInitialConnectionEstablished += Relay_OnInitialConnectionEstablished;
-            Relays.OnConnectionClosed += OnConnectionClosed;
-            Relays.OnAuthRequest += Relays_OnAuthRequest;
+            Relays.OnConnectionClosed += Relay_OnConnectionClosed;
+            Relays.OnAuthResponse += Relays_OnAuthResponse;
             Relays.OnEvent += OnEventReceived;
             Relays.OnRelayMetadata += Relays_OnRelayMetadata;
             Relays.OnCount += Relays_OnCount;
@@ -626,8 +594,8 @@ namespace NostrSharp
         private void DetachEvents()
         {
             Relays.OnInitialConnectionEstablished -= Relay_OnInitialConnectionEstablished;
-            Relays.OnConnectionClosed -= OnConnectionClosed;
-            Relays.OnAuthRequest -= Relays_OnAuthRequest;
+            Relays.OnConnectionClosed -= Relay_OnConnectionClosed;
+            Relays.OnAuthResponse -= Relays_OnAuthResponse;
             Relays.OnEvent -= OnEventReceived;
             Relays.OnRelayMetadata -= Relays_OnRelayMetadata;
             Relays.OnCount -= Relays_OnCount;
@@ -644,8 +612,6 @@ namespace NostrSharp
         {
             _semaphore.Wait();
             DetachEvents();
-            RelaysStatus?.Clear();
-            RelaysSubscriptionId?.Clear();
             Relays?.Dispose();
             WCParams = null;
             if (UserRelaysInfo is not null)

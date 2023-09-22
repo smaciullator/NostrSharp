@@ -14,10 +14,6 @@ namespace NostrSharp.Nostr
     [JsonConverter(typeof(NParser))]
     public class NEvent : IEquatable<NEvent>, IDisposable
     {
-        [JsonIgnore]
-        private const string _signingPlaceholder = "__sign_placeholder__";
-
-
         /// <summary>
         /// To obtain the event.id, we sha256 the serialized event.
         /// The serialization is done over the UTF-8 JSON-serialized string (with no white space or line breaks) of the following structure:
@@ -73,6 +69,10 @@ namespace NostrSharp.Nostr
         /// </summary>
         [JsonProperty(propertyName: "sig")]
         public string? Sig { get; private set; }
+
+
+        [JsonIgnore]
+        public bool Signed => !string.IsNullOrEmpty(Sig);
 
 
         public NEvent() { }
@@ -136,8 +136,8 @@ namespace NostrSharp.Nostr
         /// </summary>
         public bool Sign(NSec privateKey)
         {
-            Id = null;
-            Sig = null;
+            if (Signed)
+                return true;
 
             PubKey = privateKey.DerivePublicKey().Hex;
             CreatedAt = DateTime.UtcNow;
@@ -159,12 +159,7 @@ namespace NostrSharp.Nostr
             try
             {
                 using (NEventSign temp = new NEventSign(PubKey, CreatedAt.Value, Kind, Tags, Content))
-                {
-                    string json = JsonConvert.SerializeObject(temp, SerializerCustomSettings.EventSignSettings);
-                    // we need to include id=0 as a number instead of string
-                    json = json.Replace(@"""" + _signingPlaceholder + @"""", "0");
-                    id = json.GetSha256().ToHexString();
-                }
+                    id = JsonConvert.SerializeObject(temp, SerializerCustomSettings.EventSignSettings).GetSha256().ToHexString();
             }
             catch (Exception ex)
             {

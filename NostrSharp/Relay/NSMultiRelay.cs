@@ -1,7 +1,7 @@
 ﻿using Newtonsoft.Json;
 using NostrSharp.Relay.Models;
 using NostrSharp.Relay.Models.Messagges;
-using NostrSharp.Tools;
+using NostrSharp.Settings;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -33,7 +33,7 @@ namespace NostrSharp.Relay
         public event EventHandler<Uri> OnServerRequestedDisconnection;
 
         public event EventHandler<Uri, RelayNIP11Metadata> OnRelayMetadata;
-        public event EventHandler<Uri, NResponseAuth> OnAuthRequest;
+        public event EventHandler<Uri, NResponseAuth> OnAuthResponse;
         public event EventHandler<Uri, NResponseEvent> OnEvent;
         public event EventHandler<Uri, NResponseCount> OnCount;
         public event EventHandler<Uri, NResponseEose> OnEose;
@@ -46,10 +46,10 @@ namespace NostrSharp.Relay
 
         private List<NSRelay> Relays { get; set; } = new List<NSRelay>();
         public List<Uri> RelaysUri => Relays is null ? new List<Uri>() : Relays.Select(x => x.Configurations.Uri).ToList();
-        public List<Uri> RunningRelays => Relays is null ? new List<Uri>() : Relays.Where(x => x.IsRunning).Select(x => x.Configurations.Uri).ToList();
-
-
-        private Dictionary<Uri, CancellationTokenSource> CancellationTokens { get; set; } = new();
+        public List<NSRelay> RunningRelays => Relays is null ? new List<NSRelay>() : Relays.Where(x => x.IsRunning).ToList();
+        public List<Uri> RunningRelaysUri => Relays is null ? new List<Uri>() : Relays.Where(x => x.IsRunning).Select(x => x.Configurations.Uri).ToList();
+        public List<NSRelay> NonRunningRelays => Relays is null ? new List<NSRelay>() : Relays.Where(x => !x.IsRunning).ToList();
+        public List<Uri> NonRunningRelaysUri => Relays is null ? new List<Uri>() : Relays.Where(x => !x.IsRunning).Select(x => x.Configurations.Uri).ToList();
 
 
         public NSMultiRelay() { }
@@ -70,15 +70,16 @@ namespace NostrSharp.Relay
                     errorRelays.Add(relayConfig.Uri);
             return errorRelays;
         }
-        public bool AddRelay(NSRelayConfig relayConfig)
+        public bool AddRelay(NSRelayConfig relayConfig, CancellationTokenSource? cancellationTokenSource = null)
         {
             try
             {
-                CancellationTokenSource cancelTokenSource = new CancellationTokenSource();
-                NSRelay relay = new NSRelay(relayConfig, cancelTokenSource.Token);
+                if (Relays.Any(x => x.Uri == relayConfig.Uri))
+                    return true;
+
+                NSRelay relay = new NSRelay(relayConfig, cancellationTokenSource);
                 AttachEvents(relay);
                 Relays.Add(relay);
-                CancellationTokens.TryAdd(relayConfig.Uri, cancelTokenSource);
                 return true;
             }
             catch { return false; }
@@ -86,210 +87,259 @@ namespace NostrSharp.Relay
 
 
         /// <summary>
-        /// Tenta di avviare tutti i Relay configurati.
-        /// Restituisce una lista con i nomi dei Relay con cui non è stato possibile connettersi
+        /// Try to run a connection with all the already added relays
         /// </summary>
-        /// <returns></returns>
+        /// <returns>Return a list with the uris that has given any error during the connection</returns>
         public async Task<List<Uri>> RunAll()
         {
             List<Uri> nonRunningRelays = new();
-
             Parallel.ForEach(Relays, async (relay) =>
             {
                 if (!await relay.TryRun())
                     nonRunningRelays.Add(relay.Configurations.Uri);
-                else
-                {
-                    RelayNIP11Metadata? nip11RelayMetadata = await NSUtilities.GetNIP11RelayMetadata(relay.Configurations.Uri);
-                    if (nip11RelayMetadata is not null)
-                    {
-                        relay.SetCapabilities(nip11RelayMetadata);
-                        OnRelayMetadata?.Invoke(relay.Configurations.Uri, nip11RelayMetadata);
-                    }
-                }
             });
             return nonRunningRelays;
         }
+        /// <summary>
+        /// Try to run a relay connection given it's uri.
+        /// NOTE: the relay should be added using "AddRelay" before calling this method, otherwise this method return false;
+        /// </summary>
+        /// <param name="relayUri"></param>
+        /// <returns>True if everything go smooth or if the connection was already running, false otherwise</returns>
         public async Task<bool> Run(Uri relayUri)
         {
-            NSRelay? relay = GetRelayByName(relayUri);
+            NSRelay? relay = GetRelayByUri(relayUri);
             if (relay is null)
                 return false;
-            if (!await relay.TryRun())
-                return false;
-            RelayNIP11Metadata? nip11RelayMetadata = await NSUtilities.GetNIP11RelayMetadata(relayUri);
-            if (nip11RelayMetadata is not null)
-            {
-                relay.SetCapabilities(nip11RelayMetadata);
-                OnRelayMetadata?.Invoke(relay.Configurations.Uri, nip11RelayMetadata);
-            }
-            return true;
+            return await relay.TryRun();
         }
 
         /// <summary>
-        /// Tenta la disconnessione da tutti i Relay configurati.
-        /// Restituisce una lista con i nomi dei Relay con cui non è stato possibile disconnettersi
+        /// Try to stop all the relays connections
         /// </summary>
-        /// <returns></returns>
+        /// <returns>Return a list with the uris that has given any error during the disconnection</returns>
         public async Task<List<Uri>> StopAll()
         {
             List<Uri> nonStoppedRelays = new();
             foreach (NSRelay relay in Relays)
             {
-                if (CancellationTokens.ContainsKey(relay.Configurations.Uri))
-                    CancellationTokens[relay.Configurations.Uri].Cancel();
                 if (!await relay.TryStop())
                     nonStoppedRelays.Add(relay.Configurations.Uri);
+                else
+                    DetachEvents(relay);
             }
             return nonStoppedRelays;
         }
+        /// <summary>
+        /// Try to stop a relay connection given it's uri.
+        /// NOTE: the relay should be added using "AddRelay" before calling this method, otherwise this method return false;
+        /// </summary>
+        /// <param name="relayUri"></param>
+        /// <returns>True if everything go smooth or if the connection was already stopped, false otherwise</returns>
         public async Task<bool> Stop(Uri relayUri)
         {
-            NSRelay? relay = GetRelayByName(relayUri);
+            NSRelay? relay = GetRelayByUri(relayUri);
             if (relay is null)
                 return false;
-            if (CancellationTokens.ContainsKey(relayUri))
-                CancellationTokens[relayUri].Cancel();
-            bool result = await relay.TryStop();
-            return result;
+            DetachEvents(relay);
+            return await relay.TryStop();
         }
 
         /// <summary>
-        /// Tenta di riconnettersi con tutti i Relay configurati.
-        /// Restituisce una lista con i nomi dei Relay con cui non è stato possibile riconnettersi
+        /// Try to stop and start the connection with all the configured relays.
         /// </summary>
-        /// <returns></returns>
+        /// <returns>Return a list with the uris that has given any error during the process</returns>
         public async Task<List<Uri>> ReconnectAll()
         {
             List<Uri> nonReconnectedRelays = new();
             foreach (NSRelay relay in Relays)
+            {
                 if (!await relay.TryReconnect())
                     nonReconnectedRelays.Add(relay.Configurations.Uri);
+                else
+                    AttachEvents(relay);
+            }
             return nonReconnectedRelays;
         }
+        /// <summary>
+        /// Try to stop and start the connection with the specified relay
+        /// </summary>
+        /// <param name="relayUri"></param>
+        /// <returns>True if everything go smooth, false otherwise</returns>
         public async Task<bool> Reconnect(Uri relayUri)
         {
-            NSRelay? relay = GetRelayByName(relayUri);
+            NSRelay? relay = GetRelayByUri(relayUri);
             if (relay is null)
                 return false;
-            return await relay.TryReconnect();
+            bool reconnected = await relay.TryReconnect();
+            if (reconnected)
+                AttachEvents(relay);
+            return reconnected;
         }
 
 
+        /// <summary>
+        /// Try to send an Authentication request to a specific relay by it's uri.
+        /// </summary>
+        /// <param name="relayUri"></param>
+        /// <param name="request"></param>
+        /// <param name="token"></param>
+        /// <returns>True if the send has been succesful, false otherwise</returns>
         public async Task<bool> SendAuthentication(Uri relayUri, NRequestAuth request, CancellationToken? token = null)
         {
-            return await Send(relayUri, JsonConvert.SerializeObject(request), token);
-        }
-        public async Task<List<Uri>> SendEvent(NRequestEvent request, CancellationToken? token = null)
-        {
-            return await Send(JsonConvert.SerializeObject(request), token);
-        }
-        public async Task<List<Uri>> SendCountFilter(NRequestCount request, CancellationToken? token = null)
-        {
-            return await Send(JsonConvert.SerializeObject(request), token);
-        }
-        public async Task<List<Uri>> SendFilter(NRequestReq request, CancellationToken? token = null)
-        {
-            return await Send(JsonConvert.SerializeObject(request), token);
-        }
-        public async Task<List<Uri>> SendClose(NRequestClose request, CancellationToken? token = null)
-        {
-            return await Send(JsonConvert.SerializeObject(request), token);
-        }
-        public async Task<bool> SendEvent(Uri relayUri, NRequestEvent request, CancellationToken? token = null)
-        {
-            return await Send(relayUri, JsonConvert.SerializeObject(request), token);
-        }
-        public async Task<bool> SendCountFilter(Uri relayUri, NRequestCount request, CancellationToken? token = null)
-        {
-            return await Send(relayUri, JsonConvert.SerializeObject(request), token);
-        }
-        public async Task<bool> SendFilter(Uri relayUri, NRequestReq request, CancellationToken? token = null)
-        {
-            return await Send(relayUri, JsonConvert.SerializeObject(request), token);
-        }
-        public async Task<bool> SendClose(Uri relayUri, NRequestClose request, CancellationToken? token = null)
-        {
-            return await Send(relayUri, JsonConvert.SerializeObject(request), token);
+            return await Send(relayUri, JsonConvert.SerializeObject(request, SerializerCustomSettings.Settings), token);
         }
 
         /// <summary>
-        /// Invia una string a tutti i Relay connessi.
-        /// Restituisce una lista con i nomi dei Relay a cui non è stato possibile inviare il messaggio
+        /// Try to send an event to all the connected relays.
         /// </summary>
-        /// <param name="msg"></param>
-        /// <returns></returns>
+        /// <param name="request"></param>
+        /// <param name="token"></param>
+        /// <returns>Return a list with the uris that has given some error during the send</returns>
+        public async Task<List<Uri>> SendEvent(NRequestEvent request, CancellationToken? token = null)
+        {
+            return await Send(JsonConvert.SerializeObject(request, SerializerCustomSettings.Settings), token);
+        }
+        /// <summary>
+        /// Try to send an event to a specific relay by it's uri.
+        /// </summary>
+        /// <param name="relayUri"></param>
+        /// <param name="request"></param>
+        /// <param name="token"></param>
+        /// <returns>True if the send has been succesful, false otherwise</returns>
+        public async Task<bool> SendEvent(Uri relayUri, NRequestEvent request, CancellationToken? token = null)
+        {
+            return await Send(relayUri, JsonConvert.SerializeObject(request, SerializerCustomSettings.Settings), token);
+        }
+
+        /// <summary>
+        /// Try to send a filter request to all the connected relays.
+        /// </summary>
+        /// <param name="request"></param>
+        /// <param name="token"></param>
+        /// <returns>Return a list with the uris that has given some error during the send</returns>
+        public async Task<List<Uri>> SendFilter(NRequestReq request, CancellationToken? token = null)
+        {
+            List<Uri> sendErrors = new();
+            foreach (NSRelay relay in RunningRelays)
+                if (!await SendFilter(relay.Configurations.Uri, request, token))
+                    sendErrors.Add(relay.Configurations.Uri);
+            return sendErrors;
+        }
+        /// <summary>
+        /// Try to send a filter request to a specific relay by it's uri.
+        /// </summary>
+        /// <param name="relayUri"></param>
+        /// <param name="request"></param>
+        /// <param name="token"></param>
+        /// <returns>True if the send has been succesful, false otherwise</returns>
+        public async Task<bool> SendFilter(Uri relayUri, NRequestReq request, CancellationToken? token = null)
+        {
+            if (!CheckSubscriptionId(relayUri, request))
+                return false;
+            return await Send(relayUri, JsonConvert.SerializeObject(request, SerializerCustomSettings.Settings), token);
+        }
+
+        /// <summary>
+        /// Try to send a count filter request to all the connected relays.
+        /// </summary>
+        /// <param name="request"></param>
+        /// <param name="token"></param>
+        /// <returns>Return a list with the uris that has given some error during the send</returns>
+        public async Task<List<Uri>> SendCount(NRequestCount request, CancellationToken? token = null)
+        {
+            List<Uri> sendErrors = new();
+            foreach (NSRelay relay in RunningRelays)
+                if (!await SendCount(relay.Configurations.Uri, request, token))
+                    sendErrors.Add(relay.Configurations.Uri);
+            return sendErrors;
+        }
+        /// <summary>
+        /// Try to send a count filter request to a specific relay by it's uri.
+        /// </summary>
+        /// <param name="relayUri"></param>
+        /// <param name="request"></param>
+        /// <param name="token"></param>
+        /// <returns>True if the send has been succesful, false otherwise</returns>
+        public async Task<bool> SendCount(Uri relayUri, NRequestCount request, CancellationToken? token = null)
+        {
+            if (!CheckSubscriptionId(relayUri, request))
+                return false;
+            return await Send(relayUri, JsonConvert.SerializeObject(request, SerializerCustomSettings.Settings), token);
+        }
+
+        /// <summary>
+        /// Try to send a close request to all the connected relays.
+        /// </summary>
+        /// <param name="request"></param>
+        /// <param name="token"></param>
+        /// <returns>Return a list with the uris that has given some error during the send</returns>
+        public async Task<List<Uri>> SendClose(NRequestClose request, CancellationToken? token = null)
+        {
+            List<Uri> sendErrors = new();
+            foreach (NSRelay relay in RunningRelays)
+                if (!await SendClose(relay.Configurations.Uri, request, token))
+                    sendErrors.Add(relay.Configurations.Uri);
+            return sendErrors;
+        }
+        /// <summary>
+        /// Try to send a close request to a specific relay by it's uri.
+        /// </summary>
+        /// <param name="relayUri"></param>
+        /// <param name="request"></param>
+        /// <param name="token"></param>
+        /// <returns>True if the send has been succesful, false otherwise</returns>
+        public async Task<bool> SendClose(Uri relayUri, NRequestClose request, CancellationToken? token = null)
+        {
+            if (!CheckSubscriptionId(relayUri, request))
+                return false;
+            return await Send(relayUri, JsonConvert.SerializeObject(request, SerializerCustomSettings.Settings), token);
+        }
+
+
         public async Task<List<Uri>> Send(string msg, CancellationToken? token = null)
         {
             List<Uri> sendErrors = new();
-            foreach (NSRelay relay in Relays)
+            foreach (NSRelay relay in RunningRelays)
                 if (!await relay.Send(msg, token))
                     sendErrors.Add(relay.Configurations.Uri);
             return sendErrors;
         }
-        /// <summary>
-        /// Invia un byte[] a tutti i Relay connessi.
-        /// Restituisce una lista con i nomi dei Relay a cui non è stato possibile inviare il messaggio
-        /// </summary>
-        /// <param name="msg"></param>
-        /// <returns></returns>
+        public async Task<bool> Send(Uri relayUri, string msg, CancellationToken? token = null)
+        {
+            NSRelay? relay = GetRelayByUri(relayUri);
+            if (relay is null)
+                return false;
+            return await relay.Send(msg, token);
+        }
+
         public async Task<List<Uri>> Send(byte[] msg, CancellationToken? token = null)
         {
             List<Uri> sendErrors = new();
-            foreach (NSRelay relay in Relays)
+            foreach (NSRelay relay in RunningRelays)
                 if (!await relay.Send(msg, token))
                     sendErrors.Add(relay.Configurations.Uri);
             return sendErrors;
         }
-        /// <summary>
-        /// Invia un ArraySegment<byte> a tutti i Relay connessi.
-        /// Restituisce una lista con i nomi dei Relay a cui non è stato possibile inviare il messaggio
-        /// </summary>
-        /// <param name="msg"></param>
-        /// <returns></returns>
+        public async Task<bool> Send(Uri relayUri, byte[] msg, CancellationToken? token = null)
+        {
+            NSRelay? relay = GetRelayByUri(relayUri);
+            if (relay is null)
+                return false;
+            return await relay.Send(msg, token);
+        }
+
         public async Task<List<Uri>> Send(ArraySegment<byte> msg, CancellationToken? token = null)
         {
             List<Uri> sendErrors = new();
-            foreach (NSRelay relay in Relays)
+            foreach (NSRelay relay in RunningRelays)
                 if (!await relay.Send(msg, token))
                     sendErrors.Add(relay.Configurations.Uri);
             return sendErrors;
         }
-        /// <summary>
-        /// Invia una string al relay indicato e restituisce un esito
-        /// </summary>
-        /// <param name="relayUri"></param>
-        /// <param name="msg"></param>
-        /// <returns></returns>
-        public async Task<bool> Send(Uri relayUri, string msg, CancellationToken? token = null)
-        {
-            NSRelay? relay = GetRelayByName(relayUri);
-            if (relay is null)
-                return false;
-            return await relay.Send(msg, token);
-        }
-        /// <summary>
-        /// Invia una string al relay indicato e restituisce un esito
-        /// </summary>
-        /// <param name="relayUri"></param>
-        /// <param name="msg"></param>
-        /// <returns></returns>
-        public async Task<bool> Send(Uri relayUri, byte[] msg, CancellationToken? token = null)
-        {
-            NSRelay? relay = GetRelayByName(relayUri);
-            if (relay is null)
-                return false;
-            return await relay.Send(msg, token);
-        }
-        /// <summary>
-        /// Invia una string al relay indicato e restituisce un esito
-        /// </summary>
-        /// <param name="relayUri"></param>
-        /// <param name="msg"></param>
-        /// <returns></returns>
         public async Task<bool> Send(Uri relayUri, ArraySegment<byte> msg, CancellationToken? token = null)
         {
-            NSRelay? relay = GetRelayByName(relayUri);
+            NSRelay? relay = GetRelayByUri(relayUri);
             if (relay is null)
                 return false;
             return await relay.Send(msg, token);
@@ -297,9 +347,55 @@ namespace NostrSharp.Relay
 
 
         #region Misc
-        private NSRelay? GetRelayByName(Uri relayUri)
+        private NSRelay? GetRelayByUri(Uri relayUri)
         {
-            return Relays.FirstOrDefault(r => r.Name == relayUri.Host);
+            return Relays.FirstOrDefault(r => r.Uri == relayUri);
+        }
+        private Guid? GetRelaySubscriptionIdByUri(Uri relayUri)
+        {
+            NSRelay? relay = GetRelayByUri(relayUri);
+            if (relay is null)
+                return null;
+            return relay.SubscriptionId;
+        }
+        private bool CheckSubscriptionId(Uri relayUri, NRequestReq request)
+        {
+            if (string.IsNullOrEmpty(request.SubscriptionId) || !Guid.TryParse(request.SubscriptionId, out _))
+            {
+                Guid? subscriptionId = GetRelaySubscriptionIdByUri(relayUri);
+                if (subscriptionId is null)
+                    return false;
+                request.SubscriptionId = subscriptionId.ToString() ?? "";
+                if (string.IsNullOrEmpty(request.SubscriptionId) || !Guid.TryParse(request.SubscriptionId, out _))
+                    return false;
+            }
+            return true;
+        }
+        private bool CheckSubscriptionId(Uri relayUri, NRequestCount request)
+        {
+            if (string.IsNullOrEmpty(request.SubscriptionId) || !Guid.TryParse(request.SubscriptionId, out _))
+            {
+                Guid? subscriptionId = GetRelaySubscriptionIdByUri(relayUri);
+                if (subscriptionId is null)
+                    return false;
+                request.SubscriptionId = subscriptionId.ToString() ?? "";
+                if (string.IsNullOrEmpty(request.SubscriptionId) || !Guid.TryParse(request.SubscriptionId, out _))
+                    return false;
+            }
+            return true;
+        }
+        private bool CheckSubscriptionId(Uri relayUri, NRequestClose request)
+        {
+            if (string.IsNullOrEmpty(request.SubscriptionId) || !Guid.TryParse(request.SubscriptionId, out _))
+            {
+                Guid? subscriptionId = GetRelaySubscriptionIdByUri(relayUri);
+                if (subscriptionId is null)
+                    return false;
+                request.SubscriptionId = subscriptionId.ToString() ?? "";
+                if (string.IsNullOrEmpty(request.SubscriptionId) || !Guid.TryParse(request.SubscriptionId, out _))
+                    return false;
+            }
+            return true;
         }
         #endregion
 
@@ -319,7 +415,8 @@ namespace NostrSharp.Relay
             relay.OnConnectionError += Relay_OnConnectionError;
             relay.OnUserRequestedDisconnection += Relay_OnUserRequestedDisconnection;
             relay.OnServerRequestedDisconnection += Relay_OnServerRequestedDisconnection;
-            relay.OnAuthRequest += Relay_OnAuthRequest;
+            relay.OnRelayMetadata += Relay_OnRelayMetadata;
+            relay.OnAuthResponse += Relay_OnAuthResponse;
             relay.OnEvent += Relay_OnEvent;
             relay.OnCount += Relay_OnCount;
             relay.OnEose += Relay_OnEose;
@@ -342,7 +439,8 @@ namespace NostrSharp.Relay
             relay.OnConnectionError -= Relay_OnConnectionError;
             relay.OnUserRequestedDisconnection -= Relay_OnUserRequestedDisconnection;
             relay.OnServerRequestedDisconnection -= Relay_OnServerRequestedDisconnection;
-            relay.OnAuthRequest -= Relay_OnAuthRequest;
+            relay.OnRelayMetadata -= Relay_OnRelayMetadata;
+            relay.OnAuthResponse -= Relay_OnAuthResponse;
             relay.OnEvent -= Relay_OnEvent;
             relay.OnCount -= Relay_OnCount;
             relay.OnEose -= Relay_OnEose;
@@ -401,11 +499,15 @@ namespace NostrSharp.Relay
         {
             OnServerRequestedDisconnection?.Invoke(relayUri);
         }
-
-
-        private void Relay_OnAuthRequest(Uri relayUri, NResponseAuth response)
+        private void Relay_OnRelayMetadata(Uri relayUri, RelayNIP11Metadata relayCapabilities)
         {
-            OnAuthRequest?.Invoke(relayUri, response);
+            OnRelayMetadata?.Invoke(relayUri, relayCapabilities);
+        }
+
+
+        private void Relay_OnAuthResponse(Uri relayUri, NResponseAuth response)
+        {
+            OnAuthResponse?.Invoke(relayUri, response);
         }
         private void Relay_OnEvent(Uri relayUri, NResponseEvent response)
         {
@@ -441,12 +543,7 @@ namespace NostrSharp.Relay
         public void Dispose()
         {
             foreach (NSRelay relay in Relays)
-            {
                 DetachEvents(relay);
-                CancellationTokens[relay.Configurations.Uri].Cancel();
-                relay.Dispose();
-            }
-            CancellationTokens.Clear();
             Relays.Clear();
         }
     }

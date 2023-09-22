@@ -21,8 +21,8 @@ namespace NostrSharp.Relay.Models
         public NSRelayConfig(string uri) : this(uri, null) { }
         public NSRelayConfig(string uri, RelayPermissions permissions) : this(new Uri(!uri.StartsWith("wss://") ? $"wss://{uri.Replace("https://", "")}" : uri.Replace("https://", "")), null, null, permissions) { }
         public NSRelayConfig(Uri uri) : this(uri, null) { }
-        public NSRelayConfig(Uri uri, RelayPermissions permissions) : this(uri, null, null, permissions) { }
-        public NSRelayConfig(Uri uri, TimeSpan? reconnectTimeout, TimeSpan? errorReconnectTimeout, RelayPermissions permissions)
+        public NSRelayConfig(Uri uri, RelayPermissions? permissions) : this(uri, null, null, permissions) { }
+        public NSRelayConfig(Uri uri, TimeSpan? reconnectTimeout, TimeSpan? errorReconnectTimeout, RelayPermissions? permissions)
         {
             Uri = uri;
             ReconnectTimeout = reconnectTimeout;
