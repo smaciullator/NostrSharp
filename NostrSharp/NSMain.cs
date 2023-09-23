@@ -67,9 +67,8 @@ namespace NostrSharp
         public NSMultiRelay Relays { get; private set; } = new();
 
 
-        private List<RelayInfo> UserRelaysInfo { get; set; } = new();
+        private List<NSRelayConfig> UserRelaysConfig => Relays is null ? new() : Relays.Relays.Select(x => x.Configurations).ToList();
         private WalletConnect? WCParams { get; set; } = default;
-        private static SemaphoreSlim _semaphore { get; set; } = new SemaphoreSlim(1);
 
 
         public NSMain()
@@ -173,18 +172,18 @@ namespace NostrSharp
                 return true;
 
             Relays.AddRelay(relay);
-            return await Relays.Run(relay.Uri);
+            return await Relays.Connect(relay.Uri);
         }
 
         public async Task<List<Uri>> DisconnectRelays(CancellationToken? token = null)
         {
             await Relays.SendClose(new NRequestClose(""), token);
-            return await Relays.StopAll();
+            return await Relays.DisconnectAll();
         }
         public async Task<bool> DisconnectRelay(Uri relayUri)
         {
             await Relays.SendClose(relayUri, new NRequestClose(""));
-            return await Relays.Stop(relayUri);
+            return await Relays.Disconnect(relayUri);
         }
 
         public async Task<List<Uri>> ReconnectRelays(CancellationToken? token = null)
@@ -210,10 +209,10 @@ namespace NostrSharp
         }
         public RelayPermissions? GetRelayPermissions(Uri relayUri)
         {
-            RelayInfo? permissions = UserRelaysInfo.FirstOrDefault(x => x.RelayUri == relayUri.ToString());
-            if (permissions is null)
+            NSRelayConfig? config = UserRelaysConfig.FirstOrDefault(x => x.Uri == relayUri);
+            if (config is null)
                 return null;
-            return permissions.RelayPermissions;
+            return config.RelayPermissions;
         }
 
 
@@ -484,8 +483,10 @@ namespace NostrSharp
 
 
         #region Events
-        private void Relay_OnInitialConnectionEstablished(Uri relayUri)
+        private async void Relay_OnInitialConnectionEstablished(Uri relayUri)
         {
+            // I ask the relay for my contacts so i can set read/write permission on NSRelay instance
+            await GetMyContacts(relayUri);
             OnInitialConnectionEstablished?.Invoke(relayUri);
         }
         private void Relay_OnConnectionClosed(Uri relayUri, string reason)
@@ -520,7 +521,9 @@ namespace NostrSharp
                     break;
                 case NKind.Contacts:
                     List<RelayInfo> relaysInfo = JsonConvert.DeserializeObject<List<RelayInfo>>(ev.Event.Content ?? "", SerializerCustomSettings.Settings) ?? new();
-                    UserRelaysInfo = new(relaysInfo);
+                    // If this is my kind 3 event i want to set read/write permissions info on the corresponding relays
+                    if (TryGetNPub(out NPub? npub) && npub is not null && ev.Event.PubKey == npub.Hex)
+                        Relays.SetRelaysPermissions(relaysInfo);
                     OnContacts?.Invoke(relayUri, ev.Event, relaysInfo);
                     break;
                 case NKind.EncryptedDm:
@@ -610,17 +613,13 @@ namespace NostrSharp
 
         public void Dispose()
         {
-            _semaphore.Wait();
             DetachEvents();
             Relays?.Dispose();
             WCParams = null;
-            if (UserRelaysInfo is not null)
-                UserRelaysInfo.Clear();
-            UserRelaysInfo = null;
+            if (UserRelaysConfig is not null)
+                UserRelaysConfig.Clear();
             NPub = null;
             NSec = null;
-            _semaphore.Release();
-            _semaphore.Dispose();
         }
     }
 }

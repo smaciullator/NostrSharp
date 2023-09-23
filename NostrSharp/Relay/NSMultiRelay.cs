@@ -44,7 +44,7 @@ namespace NostrSharp.Relay
         #endregion
 
 
-        private List<NSRelay> Relays { get; set; } = new List<NSRelay>();
+        public List<NSRelay> Relays { get; private set; } = new List<NSRelay>();
         public List<Uri> RelaysUri => Relays is null ? new List<Uri>() : Relays.Select(x => x.Configurations.Uri).ToList();
         public List<NSRelay> RunningRelays => Relays is null ? new List<NSRelay>() : Relays.Where(x => x.IsRunning).ToList();
         public List<Uri> RunningRelaysUri => Relays is null ? new List<Uri>() : Relays.Where(x => x.IsRunning).Select(x => x.Configurations.Uri).ToList();
@@ -62,6 +62,14 @@ namespace NostrSharp.Relay
         }
 
 
+        #region Connection
+        /// <summary>
+        /// Add a new list of relays instance to the internal list of relays.
+        /// NOTE: this method will NOT start the connections with the relays.
+        /// If you want to start the connections you have to call "ConnectAll()" method
+        /// </summary>
+        /// <param name="relaysConfigs"></param>
+        /// <returns></returns>
         public List<Uri> AddRelays(List<NSRelayConfig> relaysConfigs)
         {
             List<Uri> errorRelays = new();
@@ -70,6 +78,14 @@ namespace NostrSharp.Relay
                     errorRelays.Add(relayConfig.Uri);
             return errorRelays;
         }
+        /// <summary>
+        /// Add a new relay instance to the internal list of relays.
+        /// NOTE: this method will NOT start the connection with the relay.
+        /// If you want to start the connection you have to call "ConnectAll()" or "Connect()" methods
+        /// </summary>
+        /// <param name="relayConfig"></param>
+        /// <param name="cancellationTokenSource"></param>
+        /// <returns></returns>
         public bool AddRelay(NSRelayConfig relayConfig, CancellationTokenSource? cancellationTokenSource = null)
         {
             try
@@ -90,12 +106,12 @@ namespace NostrSharp.Relay
         /// Try to run a connection with all the already added relays
         /// </summary>
         /// <returns>Return a list with the uris that has given any error during the connection</returns>
-        public async Task<List<Uri>> RunAll()
+        public async Task<List<Uri>> ConnectAll()
         {
             List<Uri> nonRunningRelays = new();
             Parallel.ForEach(Relays, async (relay) =>
             {
-                if (!await relay.TryRun())
+                if (!await relay.TryConnect())
                     nonRunningRelays.Add(relay.Configurations.Uri);
             });
             return nonRunningRelays;
@@ -106,24 +122,23 @@ namespace NostrSharp.Relay
         /// </summary>
         /// <param name="relayUri"></param>
         /// <returns>True if everything go smooth or if the connection was already running, false otherwise</returns>
-        public async Task<bool> Run(Uri relayUri)
+        public async Task<bool> Connect(Uri relayUri)
         {
             NSRelay? relay = GetRelayByUri(relayUri);
             if (relay is null)
                 return false;
-            return await relay.TryRun();
+            return await relay.TryConnect();
         }
-
         /// <summary>
         /// Try to stop all the relays connections
         /// </summary>
         /// <returns>Return a list with the uris that has given any error during the disconnection</returns>
-        public async Task<List<Uri>> StopAll()
+        public async Task<List<Uri>> DisconnectAll()
         {
             List<Uri> nonStoppedRelays = new();
             foreach (NSRelay relay in Relays)
             {
-                if (!await relay.TryStop())
+                if (!await relay.TryDisconnect())
                     nonStoppedRelays.Add(relay.Configurations.Uri);
                 else
                     DetachEvents(relay);
@@ -136,15 +151,14 @@ namespace NostrSharp.Relay
         /// </summary>
         /// <param name="relayUri"></param>
         /// <returns>True if everything go smooth or if the connection was already stopped, false otherwise</returns>
-        public async Task<bool> Stop(Uri relayUri)
+        public async Task<bool> Disconnect(Uri relayUri)
         {
             NSRelay? relay = GetRelayByUri(relayUri);
             if (relay is null)
                 return false;
             DetachEvents(relay);
-            return await relay.TryStop();
+            return await relay.TryDisconnect();
         }
-
         /// <summary>
         /// Try to stop and start the connection with all the configured relays.
         /// </summary>
@@ -176,8 +190,10 @@ namespace NostrSharp.Relay
                 AttachEvents(relay);
             return reconnected;
         }
+        #endregion
 
 
+        #region Send
         /// <summary>
         /// Try to send an Authentication request to a specific relay by it's uri.
         /// </summary>
@@ -344,9 +360,25 @@ namespace NostrSharp.Relay
                 return false;
             return await relay.Send(msg, token);
         }
+        #endregion
 
 
         #region Misc
+        /// <summary>
+        /// Set the read/write permissions for the relays list specified
+        /// </summary>
+        /// <param name="permissions"></param>
+        public void SetRelaysPermissions(List<RelayInfo> relayInfos)
+        {
+            foreach (RelayInfo info in relayInfos)
+            {
+                NSRelay? relay = GetRelayByUri(new(info.RelayUri));
+                if (relay is not null)
+                    relay.SetRelayPermissions(info.RelayPermissions);
+            }
+        }
+
+
         private NSRelay? GetRelayByUri(Uri relayUri)
         {
             return Relays.FirstOrDefault(r => r.Uri == relayUri);
@@ -358,6 +390,8 @@ namespace NostrSharp.Relay
                 return null;
             return relay.SubscriptionId;
         }
+
+
         private bool CheckSubscriptionId(Uri relayUri, NRequestReq request)
         {
             if (string.IsNullOrEmpty(request.SubscriptionId) || !Guid.TryParse(request.SubscriptionId, out _))

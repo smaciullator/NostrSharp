@@ -90,7 +90,7 @@ namespace NostrSharp.Relay
         /// Try to start a Web Socket connection with the configured relay.
         /// </summary>
         /// <returns>True if everything go smooth or if the connection was already running, false otherwise</returns>
-        public async Task<bool> TryRun()
+        public async Task<bool> TryConnect()
         {
             if (Configurations is null)
                 return false;
@@ -124,7 +124,7 @@ namespace NostrSharp.Relay
         /// Try to stop the ongoing Web Socket connection
         /// </summary>
         /// <returns>True if everything go smooth or if the connection was already stopped, false otherwise</returns>
-        public async Task<bool> TryStop()
+        public async Task<bool> TryDisconnect()
         {
             if (!IsRunning)
                 return true;
@@ -158,8 +158,8 @@ namespace NostrSharp.Relay
         {
             try
             {
-                if (await TryStop())
-                    await TryRun();
+                if (await TryDisconnect())
+                    await TryConnect();
                 return IsRunning;
             }
             catch (Exception ex)
@@ -182,6 +182,14 @@ namespace NostrSharp.Relay
                 Capabilities = nip11RelayMetadata;
                 OnRelayMetadata?.Invoke(Configurations.Uri, nip11RelayMetadata);
             }
+        }
+        /// <summary>
+        /// Set the read/write permissions for this relay connection instance
+        /// </summary>
+        /// <param name="permissions"></param>
+        public void SetRelayPermissions(RelayPermissions permissions)
+        {
+            Configurations.RelayPermissions = permissions;
         }
 
 
@@ -391,7 +399,7 @@ namespace NostrSharp.Relay
 
         public async void Dispose()
         {
-            await TryStop();
+            await TryDisconnect();
             WSC.Dispose();
             Configurations = null;
         }
