@@ -22,8 +22,9 @@ namespace NostrSharp.Keys
 
 
         /// <summary>
-        /// Genera una nuova chiave privata
+        /// Generate a new private key Hex and return a valid NSec instance
         /// </summary>
+        /// <returns></returns>
         public static NSec New()
         {
             using RandomNumberGenerator randomGen = RandomNumberGenerator.Create();
@@ -35,18 +36,21 @@ namespace NostrSharp.Keys
 
 
         /// <summary>
-        /// Derive public key from this private key
+        /// Derive an NPub instance from this NSec
         /// </summary>
+        /// <returns></returns>
         public NPub DerivePublicKey()
         {
             return NPub.FromPrivateEc(Ec);
         }
         /// <summary>
-        /// Derive shared key between secret and public one
+        /// Derive a shared key between this NSec instance and a specifiec NPub instance
         /// </summary>
+        /// <param name="publicKey"></param>
+        /// <returns>Return the resulting shared key as an NPub instance</returns>
+        /// <exception cref="InvalidOperationException"></exception>
         public NPub DeriveSharedKey(NPub publicKey)
         {
-            // 32 + 1 byte for the compression (0x02) prefix.
             Span<byte> input = stackalloc byte[33];
             input[0] = 0x02;
             publicKey.Ec.WriteToSpan(input[1..]);
@@ -64,16 +68,17 @@ namespace NostrSharp.Keys
 
 
         /// <summary>
-        /// Sign hex with the private key. 
-        /// Returns signature in hex format.
+        /// Accept an Hex string (event Id) and sign it using this NSec instance
         /// </summary>
+        /// <param name="hex">This should be Event.Id</param>
+        /// <returns>Return a valid signature if success, or null in case of error</returns>
         public string? SignHex(string? hex)
         {
             if (hex == null)
                 return null;
 
             byte[] hexBytes = hex.HexToByteArray();
-            return !Ec.TrySignBIP340(hexBytes, null, out SecpSchnorrSignature? signature) ? null : signature.ToBytes().ToHexString();
+            return !Ec.TrySignBIP340(hexBytes, null, out SecpSchnorrSignature? signature) || signature is null ? null : signature.ToBytes().ToHexString();
         }
 
 

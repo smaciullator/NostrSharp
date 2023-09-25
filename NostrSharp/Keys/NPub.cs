@@ -21,16 +21,18 @@ namespace NostrSharp.Keys
 
 
         /// <summary>
-        /// Validate signature of the given hex by the public key
+        /// Validate the given signature against the given hex
         /// </summary>
+        /// <param name="signatureHex"></param>
+        /// <param name="hex"></param>
+        /// <returns></returns>
         public bool IsHexSignatureValid(string? signatureHex, string? hex)
         {
-            if (string.IsNullOrWhiteSpace(signatureHex))
+            if (string.IsNullOrEmpty(signatureHex))
                 return false;
-            if (!SecpSchnorrSignature.TryCreate(signatureHex.HexToByteArray(), out SecpSchnorrSignature? schnorr))
+            if (!SecpSchnorrSignature.TryCreate(signatureHex.HexToByteArray(), out SecpSchnorrSignature? schnorr) || schnorr is null)
                 return false;
-            bool result = Ec.SigVerifyBIP340(schnorr, (hex ?? string.Empty).HexToByteArray());
-            return result;
+            return Ec.SigVerifyBIP340(schnorr, (hex ?? "").HexToByteArray());
         }
 
 

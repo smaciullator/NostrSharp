@@ -23,14 +23,17 @@ namespace NostrSharp.Keys
         /// <summary>
         /// Generate a new random key pair
         /// </summary>
+        /// <returns></returns>
         public static NSKeyPair GenerateNew()
         {
             NSec privateKey = NSec.New();
             return new NSKeyPair(privateKey);
         }
         /// <summary>
-        /// Create key pair based on private key
+        /// Create a valid NSKeyPair instance from a valid NSec instance by deriving the corresponding NPub
         /// </summary>
+        /// <param name="privateKey"></param>
+        /// <returns></returns>
         public static NSKeyPair From(NSec privateKey)
         {
             return new NSKeyPair(privateKey);
