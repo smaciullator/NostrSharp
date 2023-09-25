@@ -172,6 +172,29 @@ namespace NostrSharp
         }
 
 
+        public bool SetWalletConnectInfo(Uri walletConnectUri)
+        {
+            WCParams = NSUtilities.ReadNIP47WalletConnectUri(walletConnectUri);
+            if (WCParams is null || string.IsNullOrEmpty(WCParams.RelayUrl) || WCParams.WalletNSec is null)
+                return false;
+            return true;
+        }
+        public void SetWalletConnectInfo(WalletConnect wc)
+        {
+            WCParams = wc;
+        }
+        public void SetWalletConnectInfo(string walletPubKey, string relayUri, string secret, string? lud16 = null)
+        {
+            WCParams = new()
+            {
+                WalletPubkey = walletPubKey,
+                RelayUrl = relayUri,
+                WalletSecret = secret,
+                Lud16 = lud16
+            };
+        }
+
+
         private bool TryGetNPub(out NPub? nPub)
         {
             nPub = null;
@@ -389,6 +412,14 @@ namespace NostrSharp
         #endregion
 
 
+        #region Wallet Connect
+        public async Task<bool> GetWalletConnectInfo(Uri relayUri, CancellationToken? token = null)
+        {
+            return await SendFilter(relayUri, new NSRelayFilter(NKind.WalletInfo), token);
+        }
+        #endregion
+
+
         public async Task<List<Uri>> GetEventById(string eventIdentifier, Uri? relayUri = null, CancellationToken? token = null)
         {
             if (relayUri is null)
@@ -488,23 +519,20 @@ namespace NostrSharp
         /// <param name="walletConnectUri"></param>
         /// <param name="invoicLN"></param>
         /// <returns></returns>
-        public async Task<bool> SendWalletConnectPay(Uri walletConnectUri, string invoicLN, CancellationToken? token = null)
+        public async Task<bool> SendWalletConnectPayRequest(string invoicLN, CancellationToken? token = null)
         {
             try
             {
-                if (!TryGetNSec(out NSec? nSec) || nSec is null)
-                    return false;
-
-                WCParams = NSUtilities.ReadNIP47WalletConnectUri(walletConnectUri);
-                if (WCParams is null || string.IsNullOrEmpty(WCParams.RelayUrl) || WCParams.WalletNSec is null)
-                    return false;
-
-                NEvent? walletRequest = NSEventMaker.WalletRequestPayment(WCParams, invoicLN);
-                if (walletRequest is null)
+                if (!TryGetNSec(out NSec? nSec) || nSec is null
+                    || WCParams is null || string.IsNullOrEmpty(WCParams.RelayUrl) || WCParams.WalletNSec is null)
                     return false;
 
                 Uri wcRelayUri = new Uri(WCParams.RelayUrl);
                 if (!await ConnectRelay(new(wcRelayUri)))
+                    return false;
+
+                NEvent? walletRequest = NSEventMaker.WalletRequestPayment(WCParams, invoicLN);
+                if (walletRequest is null)
                     return false;
 
                 return await SendEvent(wcRelayUri, walletRequest, token);
