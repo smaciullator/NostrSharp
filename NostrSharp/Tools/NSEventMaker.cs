@@ -43,7 +43,7 @@ namespace NostrSharp.Tools
 
         /// <summary>
         /// NIP02: Contact List
-        /// reference: https://github.com/nostr-protocol/nips/blob/70ede5e67d3631b109dd16a811d236b4065eb44d/02.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/02.md
         /// </summary>
         /// <param name="contacts"></param>
         /// <param name="relaysList"></param>
@@ -64,8 +64,8 @@ namespace NostrSharp.Tools
         }
 
         /// <summary>
-        /// NIP67: Relay List Metadata
-        /// reference: https://github.com/nostr-protocol/nips/blob/01b6bfc28666db4b259556bf55c9269ca0c059d5/65.md
+        /// NIP65: Relay List Metadata
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/65.md
         /// </summary>
         /// <param name="relaysList"></param>
         /// <returns></returns>
@@ -81,12 +81,12 @@ namespace NostrSharp.Tools
                     explicitPermissions = "write";
                 tags.AddExternalLinkTag(relay.RelayUri.ToString(), explicitPermissions);
             }
-            return new NEvent(NKind.Contacts, tags);
+            return new NEvent(NKind.RelayListMetadata, tags);
         }
 
         /// <summary>
         /// NIP42: Authentication of Clients to Relays
-        /// reference: https://github.com/nostr-protocol/nips/blob/01b6bfc28666db4b259556bf55c9269ca0c059d5/42.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/42.md
         /// </summary>
         /// <param name="relayUri"></param>
         /// <param name="challengeString"></param>
@@ -254,7 +254,7 @@ namespace NostrSharp.Tools
 
         /// <summary>
         /// Generate a Kind 1 event with an internal reference to another event.
-        /// NOTE: the content should have a valid event identifier inside of it (see NIP21 at https://github.com/nostr-protocol/nips/blob/01b6bfc28666db4b259556bf55c9269ca0c059d5/21.md)
+        /// NOTE: the content should have a valid event identifier inside of it (see NIP21 at https://github.com/nostr-protocol/nips/blob/master/21.md)
         /// </summary>
         /// <param name="referencedEvent"></param>
         /// <param name="content"></param>
@@ -276,7 +276,7 @@ namespace NostrSharp.Tools
         }
         /// <summary>
         /// Generate a Kind 1 event with an internal reference to another event.
-        /// NOTE: the content should have a valid event identifier inside of it (see NIP21 at https://github.com/nostr-protocol/nips/blob/01b6bfc28666db4b259556bf55c9269ca0c059d5/21.md)
+        /// NOTE: the content should have a valid event identifier inside of it (see NIP21 at https://github.com/nostr-protocol/nips/blob/master/21.md)
         /// </summary>
         /// <param name="referencedEvent"></param>
         /// <param name="content"></param>
@@ -450,7 +450,7 @@ namespace NostrSharp.Tools
 
         /// <summary>
         /// NIP25: Reactions
-        /// reference: https://github.com/nostr-protocol/nips/blob/01b6bfc28666db4b259556bf55c9269ca0c059d5/25.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/25.md
         /// </summary>
         /// <param name="referencedEvent"></param>
         /// <returns></returns>
@@ -460,7 +460,7 @@ namespace NostrSharp.Tools
         }
         /// <summary>
         /// NIP25: Reactions
-        /// reference: https://github.com/nostr-protocol/nips/blob/01b6bfc28666db4b259556bf55c9269ca0c059d5/25.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/25.md
         /// </summary>
         /// <param name="referencedEvent"></param>
         /// <returns></returns>
@@ -470,7 +470,7 @@ namespace NostrSharp.Tools
         }
         /// <summary>
         /// NIP25: Reactions
-        /// reference: https://github.com/nostr-protocol/nips/blob/01b6bfc28666db4b259556bf55c9269ca0c059d5/25.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/25.md
         /// </summary>
         /// <param name="referencedEvent"></param>
         /// <param name="emoji"></param>
@@ -502,8 +502,352 @@ namespace NostrSharp.Tools
 
 
         /// <summary>
+        /// NIP51: Lists
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/51.md
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="publiclyMutedUsers"></param>
+        /// <param name="privatelyMutedUsers"></param>
+        /// <returns></returns>
+        public static NEvent? MuteList(NSec sender, List<PTag>? publiclyMutedUsers = null, List<PTag>? privatelyMutedUsers = null)
+        {
+            if (sender is null)
+                return null;
+
+            List<NTag> tags = new();
+
+            if (publiclyMutedUsers is not null)
+                foreach (PTag user in publiclyMutedUsers)
+                    tags.AddPTag(user.PubKeyHex);
+
+            string? privateMute = null;
+            if (privatelyMutedUsers is not null)
+            {
+                List<NTag> privateMuteTags = new();
+                foreach (PTag user in privatelyMutedUsers)
+                    privateMuteTags.AddPTag(user.PubKeyHex);
+                privateMute = JsonConvert.SerializeObject(privateMuteTags, SerializerCustomSettings.Settings);
+            }
+
+            NEvent ev = new NEvent(NKind.MuteList, tags, privateMute);
+            if (!ev.Encrypt(sender))
+                return null;
+            return ev;
+        }
+        /// <summary>
+        /// NIP51: Lists
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/51.md
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="overrideEncryptionMethod"></param>
+        /// <param name="publiclyMutedUsers"></param>
+        /// <param name="privatelyMutedUsers"></param>
+        /// <returns></returns>
+        public static async Task<NEvent?> MuteList(NSec sender, Func<byte[], byte[], Task<string?>> overrideEncryptionMethod,
+            List<PTag>? publiclyMutedUsers = null, List<PTag>? privatelyMutedUsers = null)
+        {
+            if (sender is null)
+                return null;
+
+            List<NTag> tags = new();
+
+            if (publiclyMutedUsers is not null)
+                foreach (PTag user in publiclyMutedUsers)
+                    tags.AddPTag(user.PubKeyHex);
+
+            string? privateMute = null;
+            if (privatelyMutedUsers is not null)
+            {
+                List<NTag> privateMuteTags = new();
+                foreach (PTag user in privatelyMutedUsers)
+                    privateMuteTags.AddPTag(user.PubKeyHex);
+                privateMute = JsonConvert.SerializeObject(privateMuteTags, SerializerCustomSettings.Settings);
+            }
+
+            NEvent ev = new NEvent(NKind.MuteList, tags, privateMute);
+            if (!await ev.Encrypt(sender, overrideEncryptionMethod))
+                return null;
+            return ev;
+        }
+        /// <summary>
+        /// NIP51: Lists
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/51.md
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="publiclyPinnedUsers"></param>
+        /// <param name="privatelyPinnedUsers"></param>
+        /// <param name="publiclyPinnedEvents"></param>
+        /// <param name="privatelyPinnedEvents"></param>
+        /// <param name="publiclyCategorizedReplaceableEvents"></param>
+        /// <param name="privatelyCategorizedReplaceableEvents"></param>
+        /// <returns></returns>
+        public static NEvent? PinList(NSec sender, List<PTag>? publiclyPinnedUsers = null, List<PTag>? privatelyPinnedUsers = null,
+            List<ETag>? publiclyPinnedEvents = null, List<ETag>? privatelyPinnedEvents = null,
+            List<ATag>? publiclyCategorizedReplaceableEvents = null, List<ATag>? privatelyCategorizedReplaceableEvents = null)
+        {
+            if (sender is null)
+                return null;
+
+            List<NTag> tags = new();
+
+            if (publiclyPinnedUsers is not null)
+                foreach (PTag user in publiclyPinnedUsers)
+                    tags.AddPTag(user.PubKeyHex);
+            if (publiclyPinnedEvents is not null)
+                foreach (ETag evt in publiclyPinnedEvents)
+                    tags.AddETag(evt.EventId, evt.PreferredRelay);
+            if (publiclyCategorizedReplaceableEvents is not null)
+                foreach (ATag evt in publiclyCategorizedReplaceableEvents)
+                    tags.AddATag(evt.Coordinates, evt.PreferredRelay);
+
+            string? content = null;
+            List<NTag> privateTags = new();
+            if (privatelyPinnedUsers is not null)
+                foreach (PTag user in privatelyPinnedUsers)
+                    privateTags.AddPTag(user.PubKeyHex);
+            if (privatelyPinnedEvents is not null)
+                foreach (ETag evt in privatelyPinnedEvents)
+                    privateTags.AddETag(evt.EventId, evt.PreferredRelay);
+            if (privatelyCategorizedReplaceableEvents is not null)
+                foreach (ATag evt in privatelyCategorizedReplaceableEvents)
+                    privateTags.AddATag(evt.Coordinates, evt.PreferredRelay);
+
+            content = JsonConvert.SerializeObject(privateTags, SerializerCustomSettings.Settings);
+
+            NEvent ev = new NEvent(NKind.PinList, tags, content);
+            if (!ev.Encrypt(sender))
+                return null;
+            return ev;
+        }
+        /// <summary>
+        /// NIP51: Lists
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/51.md
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="overrideEncryptionMethod"></param>
+        /// <param name="publiclyPinnedUsers"></param>
+        /// <param name="privatelyPinnedUsers"></param>
+        /// <param name="publiclyPinnedEvents"></param>
+        /// <param name="privatelyPinnedEvents"></param>
+        /// <param name="publiclyCategorizedReplaceableEvents"></param>
+        /// <param name="privatelyCategorizedReplaceableEvents"></param>
+        /// <returns></returns>
+        public static async Task<NEvent?> PinList(NSec sender, Func<byte[], byte[], Task<string?>> overrideEncryptionMethod,
+            List<PTag>? publiclyPinnedUsers = null, List<PTag>? privatelyPinnedUsers = null,
+            List<ETag>? publiclyPinnedEvents = null, List<ETag>? privatelyPinnedEvents = null,
+            List<ATag>? publiclyCategorizedReplaceableEvents = null, List<ATag>? privatelyCategorizedReplaceableEvents = null)
+        {
+            if (sender is null)
+                return null;
+
+            List<NTag> tags = new();
+
+            if (publiclyPinnedUsers is not null)
+                foreach (PTag user in publiclyPinnedUsers)
+                    tags.AddPTag(user.PubKeyHex);
+            if (publiclyPinnedEvents is not null)
+                foreach (ETag evt in publiclyPinnedEvents)
+                    tags.AddETag(evt.EventId, evt.PreferredRelay);
+            if (publiclyCategorizedReplaceableEvents is not null)
+                foreach (ATag evt in publiclyCategorizedReplaceableEvents)
+                    tags.AddATag(evt.Coordinates, evt.PreferredRelay);
+
+            string? content = null;
+            List<NTag> privateTags = new();
+            if (privatelyPinnedUsers is not null)
+                foreach (PTag user in privatelyPinnedUsers)
+                    privateTags.AddPTag(user.PubKeyHex);
+            if (privatelyPinnedEvents is not null)
+                foreach (ETag evt in privatelyPinnedEvents)
+                    privateTags.AddETag(evt.EventId, evt.PreferredRelay);
+            if (privatelyCategorizedReplaceableEvents is not null)
+                foreach (ATag evt in privatelyCategorizedReplaceableEvents)
+                    privateTags.AddATag(evt.Coordinates, evt.PreferredRelay);
+
+            content = JsonConvert.SerializeObject(privateTags, SerializerCustomSettings.Settings);
+
+            NEvent ev = new NEvent(NKind.PinList, tags, content);
+            if (!await ev.Encrypt(sender, overrideEncryptionMethod))
+                return null;
+            return ev;
+        }
+
+        /// <summary>
+        /// NIP51: Lists
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/51.md
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="publiclyCategorizedUsers"></param>
+        /// <param name="privatelyCategorizedUsers"></param>
+        /// <returns></returns>
+        public static NEvent? CategorizedPeopleList(NSec sender, List<PTag>? publiclyCategorizedUsers = null, List<PTag>? privatelyCategorizedUsers = null)
+        {
+            if (sender is null)
+                return null;
+
+            List<NTag> tags = new();
+
+            if (publiclyCategorizedUsers is not null)
+                foreach (PTag user in publiclyCategorizedUsers)
+                    tags.AddPTag(user.PubKeyHex);
+
+            string? privateCategorized = null;
+            if (privatelyCategorizedUsers is not null)
+            {
+                List<NTag> privateCategorizationTags = new();
+                foreach (PTag user in privatelyCategorizedUsers)
+                    privateCategorizationTags.AddPTag(user.PubKeyHex);
+                privateCategorized = JsonConvert.SerializeObject(privateCategorizationTags, SerializerCustomSettings.Settings);
+            }
+
+            NEvent ev = new NEvent(NKind.CategorizedPeopleList, tags, privateCategorized);
+            if (!ev.Encrypt(sender))
+                return null;
+            return ev;
+        }
+        /// <summary>
+        /// NIP51: Lists
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/51.md
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="overrideEncryptionMethod"></param>
+        /// <param name="publiclyCategorizedUsers"></param>
+        /// <param name="privatelyCategorizedUsers"></param>
+        /// <returns></returns>
+        public static async Task<NEvent?> CategorizedPeopleList(NSec sender, Func<byte[], byte[], Task<string?>> overrideEncryptionMethod,
+            List<PTag>? publiclyCategorizedUsers = null, List<PTag>? privatelyCategorizedUsers = null)
+        {
+            if (sender is null)
+                return null;
+
+            List<NTag> tags = new();
+
+            if (publiclyCategorizedUsers is not null)
+                foreach (PTag user in publiclyCategorizedUsers)
+                    tags.AddPTag(user.PubKeyHex);
+
+            string? privateCategorized = null;
+            if (privatelyCategorizedUsers is not null)
+            {
+                List<NTag> privateCategorizationTags = new();
+                foreach (PTag user in privatelyCategorizedUsers)
+                    privateCategorizationTags.AddPTag(user.PubKeyHex);
+                privateCategorized = JsonConvert.SerializeObject(privateCategorizationTags, SerializerCustomSettings.Settings);
+            }
+
+            NEvent ev = new NEvent(NKind.CategorizedPeopleList, tags, privateCategorized);
+            if (!await ev.Encrypt(sender, overrideEncryptionMethod))
+                return null;
+            return ev;
+        }
+
+        /// <summary>
+        /// NIP51: Lists
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/51.md
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="publiclyCategorizedUsers"></param>
+        /// <param name="privatelyCategorizedUsers"></param>
+        /// <param name="publiclyCategorizedEvents"></param>
+        /// <param name="privatelyCategorizedEvents"></param>
+        /// <param name="publiclyCategorizedReplaceableEvents"></param>
+        /// <param name="privatelyCategorizedReplaceableEvents"></param>
+        /// <returns></returns>
+        public static NEvent? CategorizedBookmarkList(NSec sender, List<PTag>? publiclyCategorizedUsers = null, List<PTag>? privatelyCategorizedUsers = null,
+            List<ETag>? publiclyCategorizedEvents = null, List<ETag>? privatelyCategorizedEvents = null,
+            List<ATag>? publiclyCategorizedReplaceableEvents = null, List<ATag>? privatelyCategorizedReplaceableEvents = null)
+        {
+            if (sender is null)
+                return null;
+
+            List<NTag> tags = new();
+
+            if (publiclyCategorizedUsers is not null)
+                foreach (PTag user in publiclyCategorizedUsers)
+                    tags.AddPTag(user.PubKeyHex);
+            if (publiclyCategorizedEvents is not null)
+                foreach (ETag evt in publiclyCategorizedEvents)
+                    tags.AddETag(evt.EventId, evt.PreferredRelay);
+            if (publiclyCategorizedReplaceableEvents is not null)
+                foreach (ATag evt in publiclyCategorizedReplaceableEvents)
+                    tags.AddATag(evt.Coordinates, evt.PreferredRelay);
+
+            string? content = null;
+            List<NTag> privateTags = new();
+            if (privatelyCategorizedUsers is not null)
+                foreach (PTag user in privatelyCategorizedUsers)
+                    privateTags.AddPTag(user.PubKeyHex);
+            if (privatelyCategorizedEvents is not null)
+                foreach (ETag evt in privatelyCategorizedEvents)
+                    privateTags.AddETag(evt.EventId, evt.PreferredRelay);
+            if (privatelyCategorizedReplaceableEvents is not null)
+                foreach (ATag evt in privatelyCategorizedReplaceableEvents)
+                    privateTags.AddATag(evt.Coordinates, evt.PreferredRelay);
+
+            content = JsonConvert.SerializeObject(privateTags, SerializerCustomSettings.Settings);
+
+            NEvent ev = new NEvent(NKind.CategorizedBookmarkList, tags, content);
+            if (!ev.Encrypt(sender))
+                return null;
+            return ev;
+        }
+        /// <summary>
+        /// NIP51: Lists
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/51.md
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="overrideEncryptionMethod"></param>
+        /// <param name="publiclyCategorizedUsers"></param>
+        /// <param name="privatelyCategorizedUsers"></param>
+        /// <param name="publiclyCategorizedEvents"></param>
+        /// <param name="privatelyCategorizedEvents"></param>
+        /// <param name="publiclyCategorizedReplaceableEvents"></param>
+        /// <param name="privatelyCategorizedReplaceableEvents"></param>
+        /// <returns></returns>
+        public static async Task<NEvent?> CategorizedBookmarkList(NSec sender, Func<byte[], byte[], Task<string?>> overrideEncryptionMethod,
+            List<PTag>? publiclyCategorizedUsers = null, List<PTag>? privatelyCategorizedUsers = null,
+            List<ETag>? publiclyCategorizedEvents = null, List<ETag>? privatelyCategorizedEvents = null,
+            List<ATag>? publiclyCategorizedReplaceableEvents = null, List<ATag>? privatelyCategorizedReplaceableEvents = null)
+        {
+            if (sender is null)
+                return null;
+
+            List<NTag> tags = new();
+
+            if (publiclyCategorizedUsers is not null)
+                foreach (PTag user in publiclyCategorizedUsers)
+                    tags.AddPTag(user.PubKeyHex);
+            if (publiclyCategorizedEvents is not null)
+                foreach (ETag evt in publiclyCategorizedEvents)
+                    tags.AddETag(evt.EventId, evt.PreferredRelay);
+            if (publiclyCategorizedReplaceableEvents is not null)
+                foreach (ATag evt in publiclyCategorizedReplaceableEvents)
+                    tags.AddATag(evt.Coordinates, evt.PreferredRelay);
+
+            string? content = null;
+            List<NTag> privateTags = new();
+            if (privatelyCategorizedUsers is not null)
+                foreach (PTag user in privatelyCategorizedUsers)
+                    privateTags.AddPTag(user.PubKeyHex);
+            if (privatelyCategorizedEvents is not null)
+                foreach (ETag evt in privatelyCategorizedEvents)
+                    privateTags.AddETag(evt.EventId, evt.PreferredRelay);
+            if (privatelyCategorizedReplaceableEvents is not null)
+                foreach (ATag evt in privatelyCategorizedReplaceableEvents)
+                    privateTags.AddATag(evt.Coordinates, evt.PreferredRelay);
+
+            content = JsonConvert.SerializeObject(privateTags, SerializerCustomSettings.Settings);
+
+            NEvent ev = new NEvent(NKind.CategorizedBookmarkList, tags, content);
+            if (!await ev.Encrypt(sender, overrideEncryptionMethod))
+                return null;
+            return ev;
+        }
+
+
+        /// <summary>
         /// NIP58: Badges
-        /// reference: https://github.com/nostr-protocol/nips/blob/01b6bfc28666db4b259556bf55c9269ca0c059d5/58.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/58.md
         /// </summary>
         /// <param name="uniqueBadgeIdentifier"></param>
         /// <param name="name"></param>
@@ -534,7 +878,7 @@ namespace NostrSharp.Tools
         }
         /// <summary>
         /// NIP58: Badges
-        /// reference: https://github.com/nostr-protocol/nips/blob/01b6bfc28666db4b259556bf55c9269ca0c059d5/58.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/58.md
         /// </summary>
         /// <param name="badgeDefinitionEvent"></param>
         /// <param name="pubkeysAwarded"></param>
@@ -556,7 +900,7 @@ namespace NostrSharp.Tools
         }
         /// <summary>
         /// NIP58: Badges
-        /// reference: https://github.com/nostr-protocol/nips/blob/01b6bfc28666db4b259556bf55c9269ca0c059d5/58.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/58.md
         /// </summary>
         /// <param name="badgeDefinitionEvent"></param>
         /// <param name="badgeAwardEvent"></param>
@@ -582,7 +926,7 @@ namespace NostrSharp.Tools
 
         /// <summary>
         /// NIP31: Labeling
-        /// reference: https://github.com/nostr-protocol/nips/blob/3f218fc3a16080537405e3f712b30ef10e709d5f/32.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/32.md
         /// </summary>
         /// <param name="labelInfo"></param>
         /// <param name="expiration"></param>
@@ -605,7 +949,7 @@ namespace NostrSharp.Tools
 
         /// <summary>
         /// NIP38: User Status
-        /// reference: https://github.com/nostr-protocol/nips/blob/3f218fc3a16080537405e3f712b30ef10e709d5f/38.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/38.md
         /// </summary>
         /// <param name="statusInfo"></param>
         /// <param name="expiration"></param>
@@ -637,7 +981,7 @@ namespace NostrSharp.Tools
 
         /// <summary>
         /// NIP57: Zaps
-        /// reference: https://github.com/nostr-protocol/nips/blob/3f218fc3a16080537405e3f712b30ef10e709d5f/57.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/57.md
         /// </summary>
         /// <param name="satoshisAmount"></param>
         /// <param name="bech32LNURL"></param>
@@ -668,7 +1012,7 @@ namespace NostrSharp.Tools
 
         /// <summary>
         /// NIP47: Nostr Wallet Connect
-        /// reference: https://github.com/nostr-protocol/nips/blob/3f218fc3a16080537405e3f712b30ef10e709d5f/47.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/47.md
         /// </summary>
         /// <param name="walletConnect"></param>
         /// <param name="invoiceLN"></param>
@@ -679,7 +1023,7 @@ namespace NostrSharp.Tools
         }
         /// <summary>
         /// NIP47: Nostr Wallet Connect
-        /// reference: https://github.com/nostr-protocol/nips/blob/3f218fc3a16080537405e3f712b30ef10e709d5f/47.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/47.md
         /// </summary>
         /// <param name="walletConnect"></param>
         /// <param name="parameters"></param>
@@ -709,7 +1053,7 @@ namespace NostrSharp.Tools
 
         /// <summary>
         /// NIP75: Zap Goals
-        /// reference: https://github.com/nostr-protocol/nips/blob/01b6bfc28666db4b259556bf55c9269ca0c059d5/75.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/75.md
         /// </summary>
         /// <param name="goalDescription"></param>
         /// <param name="satoshisAmount"></param>
@@ -743,7 +1087,7 @@ namespace NostrSharp.Tools
 
         /// <summary>
         /// NIP28: Public Chat (channels)
-        /// reference: https://github.com/nostr-protocol/nips/blob/3f218fc3a16080537405e3f712b30ef10e709d5f/28.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/28.md
         /// </summary>
         /// <param name="metadata"></param>
         /// <param name="proxy"></param>
@@ -757,7 +1101,7 @@ namespace NostrSharp.Tools
         }
         /// <summary>
         /// NIP28: Public Chat (channels)
-        /// reference: https://github.com/nostr-protocol/nips/blob/3f218fc3a16080537405e3f712b30ef10e709d5f/28.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/28.md
         /// </summary>
         /// <param name="newMetadata"></param>
         /// <param name="channelCreationKind40Event"></param>
@@ -775,7 +1119,7 @@ namespace NostrSharp.Tools
         }
         /// <summary>
         /// NIP28: Public Chat (channels)
-        /// reference: https://github.com/nostr-protocol/nips/blob/3f218fc3a16080537405e3f712b30ef10e709d5f/28.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/28.md
         /// </summary>
         /// <param name="content"></param>
         /// <param name="marker"></param>
@@ -812,7 +1156,7 @@ namespace NostrSharp.Tools
         }
         /// <summary>
         /// NIP28: Public Chat (channels)
-        /// reference: https://github.com/nostr-protocol/nips/blob/3f218fc3a16080537405e3f712b30ef10e709d5f/28.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/28.md
         /// </summary>
         /// <param name="motivation"></param>
         /// <param name="kind42EventToHide"></param>
@@ -836,7 +1180,7 @@ namespace NostrSharp.Tools
         }
         /// <summary>
         /// NIP28: Public Chat (channels)
-        /// reference: https://github.com/nostr-protocol/nips/blob/3f218fc3a16080537405e3f712b30ef10e709d5f/28.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/28.md
         /// </summary>
         /// <param name="motivation"></param>
         /// <param name="pubkeyToMute"></param>
@@ -860,7 +1204,7 @@ namespace NostrSharp.Tools
 
         /// <summary>
         /// NIP72: Moderated communities
-        /// reference: https://github.com/nostr-protocol/nips/blob/3f218fc3a16080537405e3f712b30ef10e709d5f/72.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/72.md
         /// </summary>
         /// <param name="uniqueCommunityName"></param>
         /// <param name="moderators"></param>
@@ -905,7 +1249,7 @@ namespace NostrSharp.Tools
         }
         /// <summary>
         /// NIP72: Moderated communities
-        /// reference: https://github.com/nostr-protocol/nips/blob/3f218fc3a16080537405e3f712b30ef10e709d5f/72.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/72.md
         /// </summary>
         /// <param name="communityDefinitionEvent"></param>
         /// <param name="approvedEventETag"></param>
@@ -934,7 +1278,7 @@ namespace NostrSharp.Tools
 
         /// <summary>
         /// NIP56: Reporting
-        /// reference: https://github.com/nostr-protocol/nips/blob/3f218fc3a16080537405e3f712b30ef10e709d5f/56.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/56.md
         /// </summary>
         /// <param name="reportedPubKey"></param>
         /// <param name="reportedNoteId"></param>
@@ -959,7 +1303,7 @@ namespace NostrSharp.Tools
 
         /// <summary>
         /// NIP04: Encrypted Direct Message
-        /// reference: https://github.com/nostr-protocol/nips/blob/3f218fc3a16080537405e3f712b30ef10e709d5f/04.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/04.md
         /// </summary>
         public static NEvent? EncryptedDirectMessage(string content, NPub receiver, NSec sender, NProxy? proxy = null)
         {
@@ -993,7 +1337,7 @@ namespace NostrSharp.Tools
 
         /// <summary>
         /// NIP15: Marketplace
-        /// reference: https://github.com/nostr-protocol/nips/blob/3f218fc3a16080537405e3f712b30ef10e709d5f/15.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/15.md
         /// </summary>
         /// <param name="stall"></param>
         /// <param name="proxy"></param>
@@ -1009,7 +1353,7 @@ namespace NostrSharp.Tools
         }
         /// <summary>
         /// NIP15: Marketplace
-        /// reference: https://github.com/nostr-protocol/nips/blob/3f218fc3a16080537405e3f712b30ef10e709d5f/15.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/15.md
         /// </summary>
         /// <param name="product"></param>
         /// <param name="categories"></param>
@@ -1030,7 +1374,7 @@ namespace NostrSharp.Tools
         }
         /// <summary>
         /// NIP15: Marketplace
-        /// reference: https://github.com/nostr-protocol/nips/blob/3f218fc3a16080537405e3f712b30ef10e709d5f/15.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/15.md
         /// </summary>
         /// <param name="order"></param>
         /// <param name="sender"></param>
@@ -1046,7 +1390,7 @@ namespace NostrSharp.Tools
         }
         /// <summary>
         /// NIP15: Marketplace
-        /// reference: https://github.com/nostr-protocol/nips/blob/3f218fc3a16080537405e3f712b30ef10e709d5f/15.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/15.md
         /// </summary>
         /// <param name="paymentRequest"></param>
         /// <param name="sender"></param>
@@ -1062,7 +1406,7 @@ namespace NostrSharp.Tools
         }
         /// <summary>
         /// NIP15: Marketplace
-        /// reference: https://github.com/nostr-protocol/nips/blob/3f218fc3a16080537405e3f712b30ef10e709d5f/15.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/15.md
         /// </summary>
         /// <param name="orderStatusUpdate"></param>
         /// <param name="sender"></param>
@@ -1080,7 +1424,7 @@ namespace NostrSharp.Tools
 
         /// <summary>
         /// NIP52: Calendar Events
-        /// reference: https://github.com/nostr-protocol/nips/blob/3f218fc3a16080537405e3f712b30ef10e709d5f/52.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/52.md
         /// </summary>
         /// <param name="uniqueId"></param>
         /// <param name="name"></param>
@@ -1132,7 +1476,7 @@ namespace NostrSharp.Tools
         }
         /// <summary>
         /// NIP52: Calendar Events
-        /// reference: https://github.com/nostr-protocol/nips/blob/3f218fc3a16080537405e3f712b30ef10e709d5f/52.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/52.md
         /// </summary>
         /// <param name="uniqueId"></param>
         /// <param name="name"></param>
@@ -1188,7 +1532,7 @@ namespace NostrSharp.Tools
         }
         /// <summary>
         /// NIP52: Calendar Events
-        /// reference: https://github.com/nostr-protocol/nips/blob/3f218fc3a16080537405e3f712b30ef10e709d5f/52.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/52.md
         /// </summary>
         /// <param name="name"></param>
         /// <param name="dateOrTimeBasedCalendarEvents"></param>
@@ -1205,7 +1549,7 @@ namespace NostrSharp.Tools
         }
         /// <summary>
         /// NIP52: Calendar Events
-        /// reference: https://github.com/nostr-protocol/nips/blob/3f218fc3a16080537405e3f712b30ef10e709d5f/52.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/52.md
         /// </summary>
         /// <param name="uniqueId"></param>
         /// <param name="dateOrTimeBasedCalendarEvent"></param>
@@ -1228,7 +1572,7 @@ namespace NostrSharp.Tools
 
         /// <summary>
         /// NIP53: Live Activities
-        /// reference: https://github.com/nostr-protocol/nips/blob/3f218fc3a16080537405e3f712b30ef10e709d5f/53.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/53.md
         /// </summary>
         /// <param name="uniqueId"></param>
         /// <param name="title"></param>
@@ -1280,7 +1624,7 @@ namespace NostrSharp.Tools
         }
         /// <summary>
         /// NIP53: Live Activities
-        /// reference: https://github.com/nostr-protocol/nips/blob/3f218fc3a16080537405e3f712b30ef10e709d5f/53.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/53.md
         /// </summary>
         /// <param name="message"></param>
         /// <param name="liveEvent"></param>
@@ -1296,7 +1640,7 @@ namespace NostrSharp.Tools
 
         /// <summary>
         /// NIP09: Event Deletion
-        /// reference: https://github.com/nostr-protocol/nips/blob/3f218fc3a16080537405e3f712b30ef10e709d5f/09.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/09.md
         /// </summary>
         /// <param name="ev"></param>
         /// <param name="optionalExplanation"></param>
@@ -1318,7 +1662,7 @@ namespace NostrSharp.Tools
         }
         /// <summary>
         /// NIP09: Event Deletion
-        /// reference: https://github.com/nostr-protocol/nips/blob/3f218fc3a16080537405e3f712b30ef10e709d5f/09.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/09.md
         /// </summary>
         /// <param name="events"></param>
         /// <param name="optionalExplanation"></param>
@@ -1352,7 +1696,7 @@ namespace NostrSharp.Tools
 
         /// <summary>
         /// NIP78: Arbitrary Custom App Data
-        /// reference: https://github.com/nostr-protocol/nips/blob/3f218fc3a16080537405e3f712b30ef10e709d5f/78.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/78.md
         /// </summary>
         /// <param name="uniqueIdentifier"></param>
         /// <param name="customContent"></param>
@@ -1376,7 +1720,7 @@ namespace NostrSharp.Tools
 
         /// <summary>
         /// NIP94: File Metadata
-        /// reference: https://github.com/nostr-protocol/nips/blob/3f218fc3a16080537405e3f712b30ef10e709d5f/94.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/94.md
         /// </summary>
         /// <returns></returns>
         public static NEvent? FileMetadata(string fileUrl, string mimeType, string sha256HexEncodedFileString,
@@ -1408,7 +1752,7 @@ namespace NostrSharp.Tools
 
         /// <summary>
         /// NIP89: Recommended Application Handlers
-        /// reference: https://github.com/nostr-protocol/nips/blob/3f218fc3a16080537405e3f712b30ef10e709d5f/89.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/89.md
         /// </summary>
         /// <param name="supportedKind">All the tags MUST contain a HandlerPlatform valid name in the CustomMarker property.</param>
         /// <param name="platformRecommendations"></param>
@@ -1430,7 +1774,7 @@ namespace NostrSharp.Tools
         }
         /// <summary>
         /// NIP89: Recommended Application Handlers
-        /// reference: https://github.com/nostr-protocol/nips/blob/3f218fc3a16080537405e3f712b30ef10e709d5f/89.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/89.md
         /// </summary>
         /// <param name="uniqueIdentifier"></param>
         /// <param name="supportedKinds"></param>
@@ -1464,7 +1808,7 @@ namespace NostrSharp.Tools
 
         /// <summary>
         /// NIP98: HTTP Auth
-        /// reference: https://github.com/nostr-protocol/nips/blob/3f218fc3a16080537405e3f712b30ef10e709d5f/98.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/98.md
         /// </summary>
         /// <returns></returns>
         public static NEvent? HttpAuth(string absoluteUrl, string method, string? serializedRequestBody = null)
@@ -1485,7 +1829,7 @@ namespace NostrSharp.Tools
 
         /// <summary>
         /// NIP99: Classified Listing
-        /// reference: https://github.com/nostr-protocol/nips/blob/3f218fc3a16080537405e3f712b30ef10e709d5f/99.md
+        /// reference: https://github.com/nostr-protocol/nips/blob/master/99.md
         /// </summary>
         /// <returns></returns>
         public static NEvent? ClassifiedListing(
