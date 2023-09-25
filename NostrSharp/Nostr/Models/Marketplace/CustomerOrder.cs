@@ -6,7 +6,7 @@ namespace NostrSharp.Nostr.Models.Marketplace
     public class CustomerOrder
     {
         [JsonProperty("id")]
-        public string id { get; set; }
+        public string Id { get; set; }
         [JsonProperty("type")]
         public MarketplaceMessageType Type { get; init; } = MarketplaceMessageType.NewOrder;
         [JsonProperty("name")]
