@@ -6,10 +6,21 @@ namespace NostrSharp.Extensions
 {
     public static class ByteArrayExtensions
     {
+        /// <summary>
+        /// Return an UTF-8 encoded string from the given byte array
+        /// </summary>
+        /// <param name="bytes"></param>
+        /// <returns></returns>
         public static string ToUTF8String(this byte[] bytes)
         {
             return Encoding.UTF8.GetString(bytes);
         }
+        /// <summary>
+        /// Return an Hex string from the given byte array
+        /// </summary>
+        /// <param name="bytes"></param>
+        /// <returns></returns>
+        /// <exception cref="ArgumentNullException"></exception>
         public static string ToHexString(this byte[] bytes)
         {
             if (bytes is null)
@@ -19,20 +30,19 @@ namespace NostrSharp.Extensions
             foreach (byte b in bytes)
                 hex.AppendFormat("{0:x2}", b);
             return hex.ToString();
-
-            //StringBuilder builder = new StringBuilder();
-            //foreach (byte b in bytes)
-            //    builder.Append(b.ToHexString());
-
-            //return builder.ToString();
         }
+        /// <summary>
+        /// Return a Bech32 string from the given byte array with the specified HRP
+        /// </summary>
+        /// <param name="hexArray"></param>
+        /// <param name="hrp"></param>
+        /// <returns></returns>
         public static string? HexKeyToBech32String(this byte[]? hexArray, string hrp)
         {
             if (hexArray == null)
                 return null;
 
-            string? npub = Bech32.Encode(hrp, hexArray);
-            return npub;
+            return Bech32.Encode(hrp, hexArray);
         }
     }
 }

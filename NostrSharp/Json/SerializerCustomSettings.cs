@@ -3,7 +3,7 @@ using Newtonsoft.Json.Converters;
 using Newtonsoft.Json.Serialization;
 using System.Collections.Generic;
 
-namespace NostrSharp.Settings
+namespace NostrSharp.Json
 {
     public static class SerializerCustomSettings
     {

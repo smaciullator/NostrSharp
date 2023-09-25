@@ -1,5 +1,5 @@
 ﻿using Newtonsoft.Json;
-using NostrSharp.Settings;
+using NostrSharp.Json;
 using System;
 
 namespace NostrSharp.Relay.Models.Messagges

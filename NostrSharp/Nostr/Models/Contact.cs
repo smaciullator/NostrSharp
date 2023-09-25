@@ -1,4 +1,4 @@
-﻿using NostrSharp.Settings;
+﻿using NostrSharp.Json;
 using System;
 using System.Text.Json.Serialization;
 

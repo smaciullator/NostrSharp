@@ -1,5 +1,6 @@
 ﻿using Newtonsoft.Json;
 using NostrSharp.Extensions;
+using NostrSharp.Json;
 using NostrSharp.Keys;
 using NostrSharp.Nostr;
 using NostrSharp.Nostr.Enums;
@@ -8,11 +9,9 @@ using NostrSharp.Nostr.Models.Channels;
 using NostrSharp.Nostr.Models.Marketplace;
 using NostrSharp.Nostr.Models.Tags;
 using NostrSharp.Relay.Models;
-using NostrSharp.Settings;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
 
 namespace NostrSharp.Tools
@@ -41,7 +40,7 @@ namespace NostrSharp.Tools
 
             return new NEvent(NKind.Metadata, tags, JsonConvert.SerializeObject(new UserMetadata(name, username, displayName, display_name, about, picture, banner, website, nip05, lud16, lud06), SerializerCustomSettings.Settings));
         }
-        
+
         /// <summary>
         /// NIP02: Contact List
         /// reference: https://github.com/nostr-protocol/nips/blob/70ede5e67d3631b109dd16a811d236b4065eb44d/02.md
@@ -63,7 +62,7 @@ namespace NostrSharp.Tools
 
             return new NEvent(NKind.Contacts, tags, content);
         }
-        
+
         /// <summary>
         /// NIP67: Relay List Metadata
         /// reference: https://github.com/nostr-protocol/nips/blob/01b6bfc28666db4b259556bf55c9269ca0c059d5/65.md
@@ -193,7 +192,7 @@ namespace NostrSharp.Tools
                 tags.AddImageTag(imageUrl);
             if (!string.IsNullOrEmpty(summary))
                 tags.AddSummaryTag(summary);
-            
+
             // Used to make this event replaceable in case of modifications
             tags.AddDTag(string.IsNullOrEmpty(articleIdentifier) ? title : articleIdentifier);
 

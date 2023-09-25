@@ -10,7 +10,7 @@ using NostrSharp.Nostr.Models.Tags;
 using NostrSharp.Relay;
 using NostrSharp.Relay.Models;
 using NostrSharp.Relay.Models.Messagges;
-using NostrSharp.Settings;
+using NostrSharp.Json;
 using NostrSharp.Tools;
 using System;
 using System.Collections.Generic;

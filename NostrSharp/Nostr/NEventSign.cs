@@ -1,6 +1,6 @@
 ﻿using Newtonsoft.Json;
 using NostrSharp.Nostr.Enums;
-using NostrSharp.Settings;
+using NostrSharp.Json;
 using System;
 using System.Collections.Generic;
 

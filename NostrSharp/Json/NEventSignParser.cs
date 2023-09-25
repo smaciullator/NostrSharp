@@ -4,7 +4,7 @@ using System;
 using System.Linq;
 using System.Reflection;
 
-namespace NostrSharp.Settings
+namespace NostrSharp.Json
 {
     public class NEventSignParser : JsonConverter
     {

@@ -5,6 +5,11 @@ namespace NostrSharp.Extensions
 {
     public static class SpanByteExtensions
     {
+        /// <summary>
+        /// Return an Hex string from the given Span<byte>
+        /// </summary>
+        /// <param name="bytes"></param>
+        /// <returns></returns>
         public static string ToHexString(this Span<byte> bytes)
         {
             StringBuilder builder = new StringBuilder();

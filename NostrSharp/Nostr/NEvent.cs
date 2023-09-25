@@ -3,7 +3,7 @@ using Newtonsoft.Json.Serialization;
 using NostrSharp.Extensions;
 using NostrSharp.Keys;
 using NostrSharp.Nostr.Enums;
-using NostrSharp.Settings;
+using NostrSharp.Json;
 using System;
 using System.Collections.Generic;
 using System.Linq;

@@ -9,7 +9,7 @@ using System.Data;
 using System.Linq;
 using System.Reflection;
 
-namespace NostrSharp.Settings
+namespace NostrSharp.Json
 {
     public class NParser : JsonConverter
     {

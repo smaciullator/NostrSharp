@@ -3,7 +3,7 @@ using Newtonsoft.Json;
 using NostrSharp.Nostr;
 using NostrSharp.Nostr.Enums;
 using NostrSharp.Nostr.Models;
-using NostrSharp.Settings;
+using NostrSharp.Json;
 using System;
 using System.Collections.Generic;
 using System.Linq;

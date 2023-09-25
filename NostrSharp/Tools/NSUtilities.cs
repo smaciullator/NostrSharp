@@ -2,6 +2,7 @@
 using Newtonsoft.Json;
 using NostrSharp.Cryptography;
 using NostrSharp.Extensions;
+using NostrSharp.Json;
 using NostrSharp.Keys;
 using NostrSharp.Models;
 using NostrSharp.Models.LN;
@@ -10,7 +11,6 @@ using NostrSharp.Nostr.Enums;
 using NostrSharp.Nostr.Identifiers;
 using NostrSharp.Nostr.Models;
 using NostrSharp.Relay.Models;
-using NostrSharp.Settings;
 using System;
 using System.Collections.Generic;
 using System.Collections.Specialized;
