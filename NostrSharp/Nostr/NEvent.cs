@@ -147,6 +147,20 @@ namespace NostrSharp.Nostr
                 Sig = privateKey.SignHex(Id);
             return Sig is not null;
         }
+        public bool IsVerified()
+        {
+            if (string.IsNullOrEmpty(PubKey) || string.IsNullOrEmpty(Sig))
+                return false;
+
+            try
+            {
+                return NPub.FromHex(PubKey).IsHexSignatureValid(Sig, GetId());
+            }
+            catch (Exception ex)
+            {
+                return false;
+            }
+        }
         /// <summary>
         /// Se l'Id non è ancora stato calcolato:
         ///     - crea una copia dell'evento usando un placeholder come Id.
