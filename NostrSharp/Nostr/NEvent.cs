@@ -227,7 +227,7 @@ namespace NostrSharp.Nostr
         /// <param name="senderKey"></param>
         /// <param name="overrideEncryptionMethod"></param>
         /// <returns></returns>
-        public async Task<bool> Encrypt(NSec senderKey, Func<byte[], byte[], Task<string>> overrideEncryptionMethod)
+        public async Task<bool> Encrypt(NSec senderKey, Func<byte[], byte[], Task<string?>> overrideEncryptionMethod)
         {
             try
             {
