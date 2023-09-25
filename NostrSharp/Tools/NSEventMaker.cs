@@ -13,6 +13,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 
 namespace NostrSharp.Tools
 {
@@ -695,7 +696,17 @@ namespace NostrSharp.Tools
                 return null;
             return ev;
         }
-
+        public static async Task<NEvent?> WalletRequestPayment(WalletConnect walletConnect, WalletRequest parameters, Func<byte[], byte[], Task<string?>> overrideEncryptionMethod)
+        {
+            if (walletConnect.WalletNSec is null)
+                return null;
+            List<NTag> tags = new();
+            tags.AddPTag(walletConnect.WalletPubkey);
+            NEvent ev = new NEvent(NKind.WalletRequest, tags, JsonConvert.SerializeObject(parameters, SerializerCustomSettings.Settings));
+            if (!await ev.Encrypt(walletConnect.WalletNSec, overrideEncryptionMethod))
+                return null;
+            return ev;
+        }
 
         /// <summary>
         /// NIP75: Zap Goals
@@ -951,14 +962,31 @@ namespace NostrSharp.Tools
         /// NIP04: Encrypted Direct Message
         /// reference: https://github.com/nostr-protocol/nips/blob/3f218fc3a16080537405e3f712b30ef10e709d5f/04.md
         /// </summary>
-        public static NEvent? EncryptedDirectMessage(string content, NSec sender, NProxy? proxy = null)
+        public static NEvent? EncryptedDirectMessage(string content, NPub receiver, NSec sender, NProxy? proxy = null)
         {
             List<NTag> tags = new();
+
+            tags.AddPTag(receiver.Hex);
+
             if (proxy is not null)
                 tags.AddProxyTag(proxy.UniqueID, proxy.Type);
 
             NEvent ev = new NEvent(NKind.EncryptedDm, tags, content);
             if (!ev.Encrypt(sender))
+                return null;
+            return ev;
+        }
+        public static async Task<NEvent?> EncryptedDirectMessage(string content, NPub receiver, NSec sender, Func<byte[], byte[], Task<string?>> overrideEncryptionMethod, NProxy? proxy = null)
+        {
+            List<NTag> tags = new();
+
+            tags.AddPTag(receiver.Hex);
+
+            if (proxy is not null)
+                tags.AddProxyTag(proxy.UniqueID, proxy.Type);
+
+            NEvent ev = new NEvent(NKind.EncryptedDm, tags, content);
+            if (!await ev.Encrypt(sender, overrideEncryptionMethod))
                 return null;
             return ev;
         }
@@ -1009,13 +1037,13 @@ namespace NostrSharp.Tools
         /// <param name="sender"></param>
         /// <param name="proxy"></param>
         /// <returns></returns>
-        public static NEvent? MarketplaceCustomerOrder(CustomerOrder order, NSec sender, NProxy? proxy = null)
+        public static NEvent? MarketplaceCustomerOrder(CustomerOrder order, NPub receiver, NSec sender, NProxy? proxy = null)
         {
             List<NTag> tags = new();
             if (proxy is not null)
                 tags.AddProxyTag(proxy.UniqueID, proxy.Type);
 
-            return EncryptedDirectMessage(JsonConvert.SerializeObject(order, SerializerCustomSettings.Settings), sender);
+            return EncryptedDirectMessage(JsonConvert.SerializeObject(order, SerializerCustomSettings.Settings), receiver, sender);
         }
         /// <summary>
         /// NIP15: Marketplace
@@ -1025,13 +1053,13 @@ namespace NostrSharp.Tools
         /// <param name="sender"></param>
         /// <param name="proxy"></param>
         /// <returns></returns>
-        public static NEvent? MarketplacePaymentRequest(PaymentRequest paymentRequest, NSec sender, NProxy? proxy = null)
+        public static NEvent? MarketplacePaymentRequest(PaymentRequest paymentRequest, NPub receiver, NSec sender, NProxy? proxy = null)
         {
             List<NTag> tags = new();
             if (proxy is not null)
                 tags.AddProxyTag(proxy.UniqueID, proxy.Type);
 
-            return EncryptedDirectMessage(JsonConvert.SerializeObject(paymentRequest, SerializerCustomSettings.Settings), sender);
+            return EncryptedDirectMessage(JsonConvert.SerializeObject(paymentRequest, SerializerCustomSettings.Settings), receiver, sender);
         }
         /// <summary>
         /// NIP15: Marketplace
@@ -1041,13 +1069,13 @@ namespace NostrSharp.Tools
         /// <param name="sender"></param>
         /// <param name="proxy"></param>
         /// <returns></returns>
-        public static NEvent? MarketplaceOrderStatusUpdate(OrderStatusUpdate orderStatusUpdate, NSec sender, NProxy? proxy = null)
+        public static NEvent? MarketplaceOrderStatusUpdate(OrderStatusUpdate orderStatusUpdate, NPub receiver, NSec sender, NProxy? proxy = null)
         {
             List<NTag> tags = new();
             if (proxy is not null)
                 tags.AddProxyTag(proxy.UniqueID, proxy.Type);
 
-            return EncryptedDirectMessage(JsonConvert.SerializeObject(orderStatusUpdate, SerializerCustomSettings.Settings), sender);
+            return EncryptedDirectMessage(JsonConvert.SerializeObject(orderStatusUpdate, SerializerCustomSettings.Settings), receiver, sender);
         }
 
 

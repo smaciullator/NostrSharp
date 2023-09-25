@@ -69,6 +69,7 @@ namespace NostrSharp
 
         private List<NSRelayConfig> UserRelaysConfig => Relays is null ? new() : Relays.Relays.Select(x => x.Configurations).ToList();
         private WalletConnect? WCParams { get; set; } = default;
+        private Func<byte[], byte[], byte[], Task<string?>> _overrideDecryptionMethod { get; set; }
 
 
         public NSMain()
@@ -120,20 +121,54 @@ namespace NostrSharp
 
             Init(NPub, NSec);
         }
-        public void Init(NPub? nPub)
+        /// <summary>
+        /// For those platforms that do not support AES-ECB decryption you can override the decryption part
+        /// by passing in a Func that has:
+        ///     - first input parameter is the encrypted string
+        ///     - second input parameter is the iv
+        ///     - output parameter is in the plain text decrypted string
+        /// </summary>
+        /// <param name="nPub"></param>
+        /// <param name="overrideDecryptionMethod"></param>
+        public void Init(NPub? nPub, Func<byte[], byte[], byte[], Task<string?>>? overrideDecryptionMethod = null)
         {
             NPub = nPub;
             NSec = null;
+            if (overrideDecryptionMethod is not null)
+                _overrideDecryptionMethod = overrideDecryptionMethod;
         }
-        public void Init(NSec? nSec)
+        /// <summary>
+        /// For those platforms that do not support AES-ECB decryption you can override the decryption part
+        /// by passing in a Func that has:
+        ///     - first input parameter is the encrypted string
+        ///     - second input parameter is the iv
+        ///     - output parameter is in the plain text decrypted string
+        /// </summary>
+        /// <param name="nSec"></param>
+        /// <param name="overrideDecryptionMethod"></param>
+        public void Init(NSec? nSec, Func<byte[], byte[], byte[], Task<string?>>? overrideDecryptionMethod = null)
         {
             NPub = null;
             NSec = nSec;
+            if (overrideDecryptionMethod is not null)
+                _overrideDecryptionMethod = overrideDecryptionMethod;
         }
-        public void Init(NPub? nPub, NSec? nSec)
+        /// <summary>
+        /// For those platforms that do not support AES-ECB decryption you can override the decryption part
+        /// by passing in a Func that has:
+        ///     - first input parameter is the encrypted string
+        ///     - second input parameter is the iv
+        ///     - output parameter is in the plain text decrypted string
+        /// </summary>
+        /// <param name="nPub"></param>
+        /// <param name="nSec"></param>
+        /// <param name="overrideDecryptionMethod"></param>
+        public void Init(NPub? nPub, NSec? nSec, Func<byte[], byte[], byte[], Task<string?>>? overrideDecryptionMethod = null)
         {
             NPub = nPub;
             NSec = nSec;
+            if (overrideDecryptionMethod is not null)
+                _overrideDecryptionMethod = overrideDecryptionMethod;
         }
 
 
@@ -501,7 +536,7 @@ namespace NostrSharp
         {
             OnAuthResponse?.Invoke(relayUri, auth.ChallengeString);
         }
-        private void OnEventReceived(Uri relayUri, NResponseEvent ev)
+        private async void OnEventReceived(Uri relayUri, NResponseEvent ev)
         {
             if (ev.Event is null)
                 return;
@@ -548,7 +583,12 @@ namespace NostrSharp
                 case NKind.WalletResponse:
                     if (WCParams is null || string.IsNullOrEmpty(WCParams.RelayUrl) || WCParams.WalletNSec is null)
                         break;
-                    WalletResponse? response = JsonConvert.DeserializeObject<WalletResponse>(ev.Event.Decrypt(WCParams.WalletNSec) ?? "", SerializerCustomSettings.Settings);
+                    string decryptedContent = "";
+                    if (_overrideDecryptionMethod is null)
+                        decryptedContent = ev.Event.Decrypt(WCParams.WalletNSec) ?? "";
+                    else
+                        decryptedContent = await ev.Event.Decrypt(WCParams.WalletNSec, _overrideDecryptionMethod) ?? "";
+                    WalletResponse? response = JsonConvert.DeserializeObject<WalletResponse>(decryptedContent, SerializerCustomSettings.Settings);
                     if (response is not null)
                         OnWalletResponseReceived?.Invoke(relayUri, response);
                     break;

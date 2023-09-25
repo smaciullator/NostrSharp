@@ -130,4 +130,154 @@ List<NostrIdentifier> identifiers = EventContentParser.ParseEventContent(eventTo
 ```
 
 
+## WEB ENVIRONMENT
+Because of .NET 6 current lack of support for all encryption primitives, i came up with the possibility to pass in custom encryption/decryption methods to extend this support in framework like *Blazor*.
 
+For example if you check the *EncryptBase64* method inside *NEvent* class, you can see how it uses *System.Security.Cryptography.Aes*: this has no support at all on .NET 6 and a very limited support on .NET 7, so this will throw PlatformNotSupported exceptions respectively on '*Aes.Create()*' for .net 6 and '*aes.EncryptCbc*' on .net 7, making impossible to use NIP-04 on Blazor
+```csharp
+// Not supported on .NET 6
+using Aes aes = Aes.Create();
+// Not supported on .NET 6 and .NET 7
+byte[] cbcEncrypted = aes.EncryptCbc(plainText, aes.IV);
+```
+
+**HOWEVER HERE'S THE SOLUTION I FOUND**
+
+Add this on you Blazor's project *wwwroot/index.html* file somewhere inside the *body* tag
+```csharp
+<script>
+    window.ArrayBufferToBase64 = function (arrayBufferText) {
+        var binary = '';
+        var bytes = new Uint8Array(arrayBufferText);
+        var len = bytes.byteLength;
+        for (var i = 0; i < len; i++) {
+            binary += String.fromCharCode(bytes[i]);
+        }
+        return window.btoa(binary);
+    };
+    window.ImportAesCbcKey = async function (sharedKeyAsByteArray) {
+        var cryptoKey = await crypto.subtle.importKey(
+            "raw", // format
+            sharedKeyAsByteArray, // keyData
+            { name: "AES-CBC" }, // algorithm
+            true, // extractable
+            ["encrypt", "decrypt"], // keyUsages
+        );
+        console.log('cryptoKey: ' + cryptoKey);
+        return cryptoKey;
+    };
+
+
+    /// <summary>
+    /// Takes the key and the plain text to encrypt using AES-256-CBC algorithm.
+    /// </summary>
+    /// <param name="sharedKeyAsByteArray">Byte array representation of key's EC</param>
+    /// <param name="plainTextAsByteArray">UTF8 plain text as byte array</param>
+    /// <returns>The encrypted string formatted as => encrypted_text + '?iv=' + init_vector</returns>
+    window.AesCbcEncrypt = async function (sharedKeyAsByteArray, plainTextAsByteArray) {
+
+        // Import the key as an AES-256-CBC key and generate a init vector
+        var cryptoKey = await window.ImportAesCbcKey(sharedKeyAsByteArray);
+        const iv = crypto.getRandomValues(new Uint8Array(16));
+
+        console.log('iv: ' + iv);
+
+        // Run the encryption
+        // reference: https://developer.mozilla.org/en-US/docs/Web/API/SubtleCrypto/encrypt
+        var encryptedText = await crypto.subtle.encrypt(
+            { name: "AES-CBC", iv },
+            cryptoKey,
+            plainTextAsByteArray
+        );
+        console.log('encryptedText: ' + encryptedText);
+
+        var base64encodedText = window.ArrayBufferToBase64(encryptedText);
+        var base64encodedIV = window.ArrayBufferToBase64(iv);
+
+        console.log('RESULT: ' + base64encodedText + "?iv=" + base64encodedIV);
+
+        // And finally the result returned is always formatted with iv separator ("?iv=")
+        return base64encodedText + "?iv=" + base64encodedIV;
+    };
+
+    /// <summary>
+    /// Takes the key, the init vector and the encrypted text decrypt using AES-256-CBC algorithm.
+    /// </summary>
+    /// <param name="sharedKeyAsByteArray">Byte array representation of key's EC</param>
+    /// <param name="ivAsByteArray">Byte array representation init vector</param>
+    /// <param name="encryptedTextAsByteArray">UTF8 encrypted text as byte array</param>
+    /// <returns>The encrypted string formatted as => encrypted_text + '?iv=' + init_vector</returns>
+    window.AesCbcDecrypt = async function (sharedKeyAsByteArray, ivAsByteArray, encryptedTextAsByteArray) {
+
+        // Import the key as an AES-256-CBC
+        var cryptoKey = await window.ImportAesCbcKey(sharedKeyAsByteArray);
+
+        // Run the decryption
+        // reference: https://developer.mozilla.org/en-US/docs/Web/API/SubtleCrypto/decrypt
+        var decryptedText = await crypto.subtle.decrypt(
+            { name: "AES-CBC", iv: ivAsByteArray.buffer }, // Init vector must be passed from outside
+            cryptoKey,
+            encryptedTextAsByteArray
+        );
+
+        // Convert the decrypted text from ArrayBuffer to Uint8Array, and then decode it as string
+        return new TextDecoder('utf-8').decode(new Uint8Array(decryptedText));
+    };
+</script>
+```
+
+Then create a new class with this code
+```csharp
+public class BlazorAesCbc
+{
+    [Inject]
+    private IJSRuntime JS { get; set; }
+
+    public BlazorAesCbc(IJSRuntime js)
+    {
+        this.JS = js;
+    }
+
+
+    public async Task<string?> Encrypt(byte[] sharedKeyAsByteArray, byte[] plainTextAsByteArray)
+    {
+        try
+        {
+            string result = await JS.InvokeAsync<string>("AesCbcEncrypt", sharedKeyAsByteArray, plainTextAsByteArray);
+            return result;
+        }
+        catch (Exception ex)
+        {
+            return null;
+        }
+    }
+    public async Task<string?> Decrypt(byte[] sharedKeyAsByteArray, byte[] ivAsByteArray, byte[] encryptedTextAsByteArray)
+    {
+        try
+        {
+            string result = await JS.InvokeAsync<string>("AesCbcDecrypt", sharedKeyAsByteArray, ivAsByteArray, encryptedTextAsByteArray);
+            return result;
+        }
+        catch (Exception ex)
+        {
+            return null;
+        }
+    }
+}
+```
+And, for the last step, add this on you *Program.cs* file, right before calling *var host = builder.Build();*
+```csharp
+builder.Services.AddSingleton<BlazorAesCbc>();
+```
+
+Now, whenever you need to encrypt/decrypt an event's Content, you can import the *BlazorAesCbc* class inside your page and pass his methods to encrypt/decrypt as shown here:
+```csharp
+// This at the top of the page
+@inject BlazorAesCbc bai
+
+// This where you need to encrypt
+NEvent? ev = await NSEventMaker.EncryptedDirectMessage("test di criptazione", ns.NPub, ns.NSec, bai.Encrypt);
+
+// This where you need to decrypt
+string? decryptedMsg = await ev.Decrypt(ns.NSec, bai.Decrypt);
+```
