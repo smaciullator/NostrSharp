@@ -1,5 +1,7 @@
 ﻿using Newtonsoft.Json;
 using NostrSharp.Json;
+using NostrSharp.Keys;
+using System;
 
 namespace NostrSharp.Models.LN
 {
@@ -34,5 +36,17 @@ namespace NostrSharp.Models.LN
 
         [JsonProperty(propertyName: "nostrPubkey")]
         public string NostrPubKey { get; set; }
+        [JsonIgnore]
+        public bool IsNostrPubKeyValid
+        {
+            get
+            {
+                if (string.IsNullOrEmpty(NostrPubKey))
+                    return false;
+                try { NPub.FromHex(NostrPubKey); }
+                catch { return false; }
+                return true;
+            }
+        }
     }
 }

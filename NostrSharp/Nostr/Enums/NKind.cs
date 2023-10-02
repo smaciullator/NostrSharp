@@ -39,7 +39,7 @@
 
         ZapGoal = 9041,
         ZapRequest = 9734,
-        Zap = 9735,
+        ZapReceipt = 9735,
 
         // Replaceable Events (10000-19999)
         MuteList = 10000,
