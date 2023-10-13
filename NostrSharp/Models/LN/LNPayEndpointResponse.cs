@@ -1,7 +1,6 @@
 ﻿using Newtonsoft.Json;
 using NostrSharp.Json;
 using NostrSharp.Keys;
-using System;
 
 namespace NostrSharp.Models.LN
 {

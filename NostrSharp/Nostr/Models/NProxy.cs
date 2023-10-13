@@ -1,5 +1,5 @@
-﻿using NostrSharp.Nostr.Enums;
-using NostrSharp.Json;
+﻿using NostrSharp.Json;
+using NostrSharp.Nostr.Enums;
 using System.Text.Json.Serialization;
 
 namespace NostrSharp.Nostr.Models

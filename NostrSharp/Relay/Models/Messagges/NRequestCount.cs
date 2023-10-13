@@ -1,6 +1,6 @@
 ﻿using Newtonsoft.Json;
-using NostrSharp.Relay.Enums;
 using NostrSharp.Json;
+using NostrSharp.Relay.Enums;
 
 namespace NostrSharp.Relay.Models.Messagges
 {
