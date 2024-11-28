@@ -4,6 +4,7 @@ using System.Collections.Specialized;
 using System.Net;
 using System.Net.Http;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace NostrSharp.Tools
@@ -24,7 +25,8 @@ namespace NostrSharp.Tools
             };
         }
 
-        internal static async Task<HttpRequestResult> Get(string url, NameValueCollection? additionalHeaders = null, bool bypassCertificateValidation = false, int timeout = 100000)
+        internal static async Task<HttpRequestResult> Get(string url, NameValueCollection? additionalHeaders = null,
+            bool bypassCertificateValidation = false, int timeout = 100000, CancellationToken? token = null)
         {
             HttpRequestResult result = new() { StatusCode = HttpStatusCode.InternalServerError };
 
@@ -36,7 +38,11 @@ namespace NostrSharp.Tools
                     foreach (string key in additionalHeaders)
                         request.Headers.Add(key, additionalHeaders[key]);
 
-                HttpResponseMessage response = await _client.SendAsync(request);
+                HttpResponseMessage response;
+                if (token.HasValue)
+                    response = await _client.SendAsync(request, token.Value);
+                else
+                    response = await _client.SendAsync(request);
                 result.StatusCode = response.StatusCode;
 
 

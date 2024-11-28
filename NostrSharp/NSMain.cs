@@ -1,6 +1,7 @@
 ﻿using Newtonsoft.Json;
 using NostrSharp.Cryptography;
 using NostrSharp.Extensions;
+using NostrSharp.Json;
 using NostrSharp.Keys;
 using NostrSharp.Models.LN;
 using NostrSharp.Nostr;
@@ -10,7 +11,6 @@ using NostrSharp.Nostr.Models.Tags;
 using NostrSharp.Relay;
 using NostrSharp.Relay.Models;
 using NostrSharp.Relay.Models.Messagges;
-using NostrSharp.Json;
 using NostrSharp.Tools;
 using System;
 using System.Collections.Generic;
@@ -32,6 +32,7 @@ namespace NostrSharp
         public event EventHandler<Uri> OnInitialConnectionEstablished;
         public event EventHandler<Uri, string> OnConnectionClosed;
 
+        public event EventHandler<Uri, NEvent> OnEvent;
         public event EventHandler<Uri, RelayNIP11Metadata> OnRelayMetadata;
         public event EventHandler<Uri, string?> OnAuthResponse;
         public event EventHandler<Uri, CountResult> OnCount;
@@ -68,7 +69,7 @@ namespace NostrSharp
 
 
         private List<NSRelayConfig> UserRelaysConfig => Relays is null ? new() : Relays.Relays.Select(x => x.Configurations).ToList();
-        private WalletConnect? WCParams { get; set; } = default;
+        public WalletConnect? WCParams { get; private set; } = default;
         private Func<byte[], byte[], byte[], Task<string?>> _overrideDecryptionMethod { get; set; }
 
 
@@ -79,27 +80,47 @@ namespace NostrSharp
 
 
         /// <summary>
-        /// Vale sia per le NPub che per le NSec, in entrambi i formati Hex o Bech32
+        /// Initialize the instance with a key. You can pass both NPub or NSec in Hex or Bech32 format.
+        /// For those platforms that do not support AES-ECB decryption you can override the decryption part
+        /// by passing in a Func that has:
+        ///     - first input parameter is the key
+        ///     - second input parameter is the iv
+        ///     - third input parameter is the encrypted string
+        ///     - output parameter is in the plain text decrypted string
         /// </summary>
         /// <param name="key"></param>
-        public void Init(string key)
+        /// <param name="overrideDecryptionMethod"></param>
+        public bool Init(string key, Func<byte[], byte[], byte[], Task<string?>>? overrideDecryptionMethod = null)
         {
-            try { Init(NPub.FromBech32(key)); }
+            try { Init(NPub.FromBech32(key), overrideDecryptionMethod); }
             catch
             {
-                try { Init(NPub.FromHex(key)); }
+                try { Init(NPub.FromHex(key), overrideDecryptionMethod); }
                 catch
                 {
-                    try { Init(NSec.FromBech32(key)); }
+                    try { Init(NSec.FromBech32(key), overrideDecryptionMethod); }
                     catch
                     {
-                        try { Init(NSec.FromHex(key)); }
+                        try { Init(NSec.FromHex(key), overrideDecryptionMethod); }
                         catch { }
                     }
                 }
             }
+            return CanRead;
         }
-        public void Init(string? npub, string? nsec)
+        /// <summary>
+        /// Initialize the instance with an npub and an nsec. You can pass string both in Hex or Bech32 format.
+        /// For those platforms that do not support AES-ECB decryption you can override the decryption part
+        /// by passing in a Func that has:
+        ///     - first input parameter is the key
+        ///     - second input parameter is the iv
+        ///     - third input parameter is the encrypted string
+        ///     - output parameter is in the plain text decrypted string
+        /// </summary>
+        /// <param name="npub"></param>
+        /// <param name="nsec"></param>
+        /// <param name="overrideDecryptionMethod"></param>
+        public bool Init(string? npub, string? nsec, Func<byte[], byte[], byte[], Task<string?>>? overrideDecryptionMethod = null)
         {
             NPub? NPub = null;
             if (!string.IsNullOrEmpty(npub))
@@ -119,56 +140,65 @@ namespace NostrSharp
                     catch { }
                 }
 
-            Init(NPub, NSec);
+            return Init(NPub, NSec, overrideDecryptionMethod);
         }
         /// <summary>
+        /// Initialize the instance with just an NPub, resulting in a READ-ONLY instance.
         /// For those platforms that do not support AES-ECB decryption you can override the decryption part
         /// by passing in a Func that has:
-        ///     - first input parameter is the encrypted string
+        ///     - first input parameter is the key
         ///     - second input parameter is the iv
+        ///     - third input parameter is the encrypted string
         ///     - output parameter is in the plain text decrypted string
         /// </summary>
         /// <param name="nPub"></param>
         /// <param name="overrideDecryptionMethod"></param>
-        public void Init(NPub? nPub, Func<byte[], byte[], byte[], Task<string?>>? overrideDecryptionMethod = null)
+        public bool Init(NPub? nPub, Func<byte[], byte[], byte[], Task<string?>>? overrideDecryptionMethod = null)
         {
             NPub = nPub;
             NSec = null;
             if (overrideDecryptionMethod is not null)
                 _overrideDecryptionMethod = overrideDecryptionMethod;
+            return CanRead;
         }
         /// <summary>
+        /// Initialize the instance with an NSec, and then derive it's NPub.
         /// For those platforms that do not support AES-ECB decryption you can override the decryption part
         /// by passing in a Func that has:
-        ///     - first input parameter is the encrypted string
+        ///     - first input parameter is the key
         ///     - second input parameter is the iv
+        ///     - third input parameter is the encrypted string
         ///     - output parameter is in the plain text decrypted string
         /// </summary>
         /// <param name="nSec"></param>
         /// <param name="overrideDecryptionMethod"></param>
-        public void Init(NSec? nSec, Func<byte[], byte[], byte[], Task<string?>>? overrideDecryptionMethod = null)
+        public bool Init(NSec? nSec, Func<byte[], byte[], byte[], Task<string?>>? overrideDecryptionMethod = null)
         {
-            NPub = null;
+            NPub = nSec is not null ? nSec.DerivePublicKey() : null;
             NSec = nSec;
             if (overrideDecryptionMethod is not null)
                 _overrideDecryptionMethod = overrideDecryptionMethod;
+            return CanWrite;
         }
         /// <summary>
+        /// Initialize the instance with a given NSec and a given NPub.
         /// For those platforms that do not support AES-ECB decryption you can override the decryption part
         /// by passing in a Func that has:
-        ///     - first input parameter is the encrypted string
+        ///     - first input parameter is the key
         ///     - second input parameter is the iv
+        ///     - third input parameter is the encrypted string
         ///     - output parameter is in the plain text decrypted string
         /// </summary>
         /// <param name="nPub"></param>
         /// <param name="nSec"></param>
         /// <param name="overrideDecryptionMethod"></param>
-        public void Init(NPub? nPub, NSec? nSec, Func<byte[], byte[], byte[], Task<string?>>? overrideDecryptionMethod = null)
+        public bool Init(NPub? nPub, NSec? nSec, Func<byte[], byte[], byte[], Task<string?>>? overrideDecryptionMethod = null)
         {
             NPub = nPub;
             NSec = nSec;
             if (overrideDecryptionMethod is not null)
                 _overrideDecryptionMethod = overrideDecryptionMethod;
+            return CanRead && CanWrite;
         }
 
 
@@ -219,9 +249,11 @@ namespace NostrSharp
         public async Task<List<Uri>> ConnectRelays(List<NSRelayConfig> relays)
         {
             List<Uri> nonRunningRelays = new();
-            foreach (NSRelayConfig relay in relays)
+            await Parallel.ForEachAsync(relays, async (relay, token) =>
+            {
                 if (!await ConnectRelay(relay))
                     nonRunningRelays.Add(relay.Uri);
+            });
             return nonRunningRelays;
         }
         public async Task<bool> ConnectRelay(NSRelayConfig relay)
@@ -231,6 +263,13 @@ namespace NostrSharp
 
             Relays.AddRelay(relay);
             return await Relays.Connect(relay.Uri);
+        }
+        public async Task ConnectRelaysAsync(List<NSRelayConfig> relays)
+        {
+            Parallel.ForEachAsync(relays, async (relay, token) =>
+            {
+                await ConnectRelay(relay);
+            });
         }
 
         public async Task<List<Uri>> DisconnectRelays(CancellationToken? token = null)
@@ -413,9 +452,17 @@ namespace NostrSharp
 
 
         #region Wallet Connect
-        public async Task<bool> GetWalletConnectInfo(Uri relayUri, CancellationToken? token = null)
+        public async Task<bool> AskWalletConnectInfo(Uri relayUri, CancellationToken? token = null)
         {
+            if (!await ConnectRelay(new(relayUri)))
+                return false;
             return await SendFilter(relayUri, new NSRelayFilter(NKind.WalletInfo), token);
+        }
+        public async Task<bool> AskWalletResponse(Uri relayUri, CancellationToken? token = null)
+        {
+            if (!await ConnectRelay(new(relayUri)))
+                return false;
+            return await SendFilter(relayUri, new NSRelayFilter(NKind.WalletResponse), token);
         }
         #endregion
 
@@ -442,62 +489,66 @@ namespace NostrSharp
 
         #region Zaps
         /// <summary>
-        /// Restituisce l'invoice da pagare in caso di successo, o null in caso di errore
+        /// Ask for a valid LN Invoice to the LN Service Provider.
         /// </summary>
-        /// <param name="lnURLorADDRESS"></param>
-        /// <param name="satoshisAmount"></param>
-        /// <param name="recipientHexPubKey"></param>
-        /// <param name="relayUrlForZapReceipt"></param>
-        /// <param name="message"></param>
-        /// <param name="eventId"></param>
-        /// <param name="eventATag"></param>
-        /// <returns></returns>
-        public async Task<string?> SendZapRequest(string lnURLorADDRESS, decimal satoshisAmount, string recipientHexPubKey, List<string> relayUrlForZapReceipt,
-            string? message, string? eventId, ATag? eventATag, CancellationToken? token = null)
+        /// <param name="lnURLorADDRESS_Recipient">A valid LNURL or LNAddress</param>
+        /// <param name="satoshisAmount">The amount expressed in Satoshi</param>
+        /// <param name="recipientHexPubKey">The pubkey that will receive the zap</param>
+        /// <param name="relayUrlForZapReceipt">A list of relays uri where you wish to receive the ZapReceipt event (kind 9735)</param>
+        /// <param name="message">An optional string message to send along with the zap</param>
+        /// <param name="eventId">An optional event Id to refer to</param>
+        /// <param name="eventATag">An optional parametrized replaceable event coordinates</param>
+        /// <param name="token">Optional cancellation token</param>
+        /// <returns>A valid LNInvoice in case of success, or null in case of error</returns>
+        public async Task<string?> GetLNInvoice(string lnURLorADDRESS_Recipient, decimal satoshisAmount, string recipientHexPubKey,
+            List<string> relayUrlForZapReceipt, string? message = null, string? eventId = null, ATag? eventATag = null,
+            CancellationToken? token = null)
         {
             try
             {
                 if (!TryGetNSec(out NSec? nSec) || nSec is null)
                     return null;
 
-                string? payEndpoint = NSUtilities.ParsePayEndpoitFromLNURLorADDRESS(lnURLorADDRESS);
+                // Parse the LNURL or LNAddress to get the payment endpoint
+                string? payEndpoint = NSUtilities.ParsePayEndpoitFromLNURLorADDRESS(lnURLorADDRESS_Recipient);
                 if (string.IsNullOrEmpty(payEndpoint))
                     return null;
-                LNPayEndpointResponse? payEndpointResponse = await NSUtilities.FetchLNPayEndpoint(payEndpoint);
+                // Ask the payment endpoint to give the ln service capabilities
+                LNPayEndpointResponse? payEndpointResponse = await NSUtilities.FetchLNPayEndpoint(payEndpoint, token);
                 if (payEndpointResponse is null)
                     return null;
 
-                if (!payEndpointResponse.AllowNostr || string.IsNullOrEmpty(payEndpointResponse.NostrPubKey))
+                // If this ln service support nostr and has a valid pubkey
+                if (!payEndpointResponse.AllowNostr || !payEndpointResponse.IsNostrPubKeyValid)
                     return null;
 
-                // La pubkey del nodo lightning deve essere un hex valido
-                try { NPub.FromHex(payEndpointResponse.NostrPubKey); }
-                catch { return null; }
-
-                byte[] encodedBody = payEndpoint.UTF8AsByteArray();
-                string? lnurl = Bech32.Encode("lnurl", encodedBody);
+                // Creo un evento ZapRequest (kind 9734)
+                string? lnurl = Bech32.Encode("lnurl", payEndpoint.UTF8AsByteArray());
                 if (string.IsNullOrEmpty(lnurl))
                     return null;
-
                 NEvent? zapRequest = NSEventMaker.ZapRequest(satoshisAmount, lnurl, recipientHexPubKey, relayUrlForZapReceipt, message, eventId, eventATag);
                 if (zapRequest is null || !zapRequest.Sign(nSec))
                     return null;
+
+                // Non lo pubblico sui relay, ma all'indirizzo contenuto nella proprietà "Callback" di payEndpointResponse
                 string? ev = JsonConvert.SerializeObject(zapRequest, SerializerCustomSettings.Settings);
                 if (string.IsNullOrEmpty(ev))
                     return null;
 
-                LNZapRequestResponse? zapResponse = await NSUtilities.FetchLNZapResponse(payEndpointResponse.Callback, ev, satoshisAmount, lnurl);
-                if (!string.IsNullOrEmpty(zapResponse.Status) || string.IsNullOrEmpty(zapResponse.Invoice))
+                LNZapRequestResponse? response = await NSUtilities.SendHttpZapRequest(payEndpointResponse.Callback, ev, satoshisAmount, lnurl, token);
+                if (response is null)
                     return null;
 
-                return zapResponse.Invoice;
+                return response.Invoice;
             }
-            catch (Exception ex)
+            catch
             {
                 return null;
             }
         }
         /// <summary>
+        /// 
+        /// 
         /// Per poter richiedere un pagamento tramite Wallet Connect è prima necessario:
         ///     - ottenere l'uri e i parametri di Wallet Connect dal proprio provider lightning
         ///     - estrapolare le info dalla stringa
@@ -517,9 +568,9 @@ namespace NostrSharp
         /// poter correttamente decryptare le risposte degli eventi NKind.WalletResponse = 23195
         /// </summary>
         /// <param name="walletConnectUri"></param>
-        /// <param name="invoicLN"></param>
+        /// <param name="invoiceLN"></param>
         /// <returns></returns>
-        public async Task<bool> SendWalletConnectPayRequest(string invoicLN, CancellationToken? token = null)
+        public async Task<bool> SendWalletConnectPayRequest(string invoiceLN, CancellationToken? token = null)
         {
             try
             {
@@ -531,13 +582,16 @@ namespace NostrSharp
                 if (!await ConnectRelay(new(wcRelayUri)))
                     return false;
 
-                NEvent? walletRequest = NSEventMaker.WalletRequestPayment(WCParams, invoicLN);
-                if (walletRequest is null)
+                NEvent? walletRequest = NSEventMaker.WalletRequestPayment(nSec, WCParams, invoiceLN);
+                if (walletRequest is null || !walletRequest.Sign(nSec))
                     return false;
 
-                return await SendEvent(wcRelayUri, walletRequest, token);
+                if (!await SendEvent(wcRelayUri, walletRequest, token))
+                    return false;
+
+                return await AskWalletResponse(new(WCParams.RelayUrl));
             }
-            catch (Exception ex)
+            catch
             {
                 return false;
             }
@@ -546,10 +600,10 @@ namespace NostrSharp
 
 
         #region Events
-        private async void Relay_OnInitialConnectionEstablished(Uri relayUri)
+        private void Relay_OnInitialConnectionEstablished(Uri relayUri)
         {
             // I ask the relay for my contacts so i can set read/write permission on NSRelay instance
-            await GetMyContacts(relayUri);
+            //await GetMyContacts(relayUri);
             OnInitialConnectionEstablished?.Invoke(relayUri);
         }
         private void Relay_OnConnectionClosed(Uri relayUri, string reason)
@@ -568,6 +622,9 @@ namespace NostrSharp
         {
             if (ev.Event is null)
                 return;
+
+            OnEvent?.Invoke(relayUri, ev.Event);
+
             switch (ev.Event.Kind)
             {
                 case NKind.Metadata:
@@ -598,7 +655,7 @@ namespace NostrSharp
                 case NKind.GenericRepost:
                     OnGenericRepost?.Invoke(relayUri, ev.Event);
                     break;
-                case NKind.Zap:
+                case NKind.ZapReceipt:
                     OnZap?.Invoke(relayUri, ev.Event);
                     break;
                 case NKind.LongFormContent:
@@ -612,8 +669,38 @@ namespace NostrSharp
                     if (WCParams is null || string.IsNullOrEmpty(WCParams.RelayUrl) || WCParams.WalletNSec is null)
                         break;
                     string decryptedContent = "";
+
+                    if (!TryGetNSec(out NSec? nSec) || nSec is null)
+                        break;
+                    if (!TryGetNPub(out NPub? nPub) || nPub is null)
+                        break;
+
                     if (_overrideDecryptionMethod is null)
-                        decryptedContent = ev.Event.Decrypt(WCParams.WalletNSec) ?? "";
+                    {
+                        try
+                        {
+                            decryptedContent = ev.Event.Decrypt(WCParams.WalletNSec) ?? "";
+                        }
+                        catch
+                        {
+                            try
+                            {
+                                decryptedContent = ev.Event.Decrypt(WCParams.WalletNSec, nPub) ?? "";
+                            }
+                            catch
+                            {
+                                try
+                                {
+                                    decryptedContent = ev.Event.Decrypt(NSec.FromBech32("nsec13w8vll9mwkcqlgw905cy6kue9n9a6dvp7u3ntqynjtxy3d53fpzswj0ps5")) ?? "";
+                                }
+                                catch
+                                {
+                                    //string a = "";
+                                }
+                            }
+                        }
+
+                    }
                     else
                         decryptedContent = await ev.Event.Decrypt(WCParams.WalletNSec, _overrideDecryptionMethod) ?? "";
                     WalletResponse? response = JsonConvert.DeserializeObject<WalletResponse>(decryptedContent, SerializerCustomSettings.Settings);

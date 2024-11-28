@@ -45,7 +45,7 @@ namespace NostrSharp.Keys
         public static NPub FromBech32(string bech32)
         {
             string? hex = bech32.Bech32ToHexKey(out string? hrp);
-            if (!Bech32Identifiers.NProfile.Equals(hrp, StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(hex))
+            if (!Bech32Identifiers.NPub.Equals(hrp, StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(hex))
                 throw new ArgumentException("Provided bech32 key is not 'npub'", nameof(bech32));
             return FromHex(hex);
         }

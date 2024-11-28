@@ -21,7 +21,7 @@ namespace NostrSharp.Nostr.Models
             {
                 if (string.IsNullOrEmpty(WalletSecret))
                     return null;
-                NSec nsec = null;
+                NSec? nsec = null;
                 try { nsec = NSec.FromHex(WalletSecret); }
                 catch
                 {

@@ -16,6 +16,7 @@ using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Web;
 
@@ -62,7 +63,7 @@ namespace NostrSharp.Tools
                 HttpRequestResult result = await HttpRequestUtilites.Get(relayUri.ToString().Replace("wss://", "https://"), customHeaders);
                 return string.IsNullOrEmpty(result.Data) ? null : JsonConvert.DeserializeObject<RelayNIP11Metadata>(result.Data, SerializerCustomSettings.Settings);
             }
-            catch (Exception ex)
+            catch
             {
                 return null;
             }
@@ -168,7 +169,7 @@ namespace NostrSharp.Tools
         public static WalletConnect? ReadNIP47WalletConnectUri(Uri walletConnectUri)
         {
             // Esempio:
-            // nostr+walletconnect:b889ff5b1513b641e2a139f661a661364979c5beee91842f8f0ef42ab558e9d4?relay=wss%3A%2F%2Frelay.damus.io&secret=71a8c14c1407c113601079c4302dab36460f0ccd0ad506f1f2dc73b5100e4f3c
+            // nostr+walletconnect:b889ff5b1513b641e2xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxe9d4?relay=wss%3A%2F%2Frelay.damus.io&secret=71xxxxxxxxxxxxxxxxxxxxxxxxxdab36460f0ccd0ad506f1f2dc73b5100e4f3c
 
             if (walletConnectUri.Scheme != "nostrwalletconnect" && walletConnectUri.Scheme != "nostr+walletconnect")
                 return null;
@@ -192,6 +193,11 @@ namespace NostrSharp.Tools
         }
 
 
+        /// <summary>
+        /// Extrapolate a valid url to send a GET request to for requesting a payment invoice
+        /// </summary>
+        /// <param name="lnUrlAddress"></param>
+        /// <returns></returns>
         public static string? ParsePayEndpoitFromLNURLorADDRESS(string lnUrlAddress)
         {
             // lud06
@@ -211,13 +217,18 @@ namespace NostrSharp.Tools
 
             return null;
         }
-        public static async Task<LNPayEndpointResponse?> FetchLNPayEndpoint(string payEndpoint)
+        /// <summary>
+        /// Make a GET request to the specified endpoint which should return a valid response as per NIP57
+        /// </summary>
+        /// <param name="payEndpoint"></param>
+        /// <returns></returns>
+        public static async Task<LNPayEndpointResponse?> FetchLNPayEndpoint(string payEndpoint, CancellationToken? token = null)
         {
             try
             {
                 NameValueCollection customHeaders = new NameValueCollection();
                 customHeaders.Add("Accept", "application/nostr+json");
-                HttpRequestResult result = await HttpRequestUtilites.Get(payEndpoint, customHeaders);
+                HttpRequestResult result = await HttpRequestUtilites.Get(payEndpoint, customHeaders, false, 100000, token);
                 return string.IsNullOrEmpty(result.Data) ? null : JsonConvert.DeserializeObject<LNPayEndpointResponse>(result.Data, SerializerCustomSettings.Settings);
             }
             catch
@@ -225,7 +236,8 @@ namespace NostrSharp.Tools
                 return null;
             }
         }
-        public static async Task<LNZapRequestResponse?> FetchLNZapResponse(string callback, string ev, decimal satoshisAmount, string lnUrl)
+        public static async Task<LNZapRequestResponse?> SendHttpZapRequest(string callback, string ev, decimal satoshisAmount,
+            string lnUrl, CancellationToken? token = null)
         {
             try
             {
@@ -233,7 +245,7 @@ namespace NostrSharp.Tools
 
                 NameValueCollection customHeaders = new NameValueCollection();
                 customHeaders.Add("Accept", "application/nostr+json");
-                HttpRequestResult result = await HttpRequestUtilites.Get(url, customHeaders);
+                HttpRequestResult result = await HttpRequestUtilites.Get(url, customHeaders, false, 100000, token);
                 return string.IsNullOrEmpty(result.Data) ? null : JsonConvert.DeserializeObject<LNZapRequestResponse>(result.Data, SerializerCustomSettings.Settings);
             }
             catch

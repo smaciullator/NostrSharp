@@ -1004,7 +1004,7 @@ namespace NostrSharp.Tools
             if (!string.IsNullOrEmpty(eventId))
                 tags.AddETag(eventId);
 
-            if (aTag is not null || !string.IsNullOrEmpty(aTag.Coordinates))
+            if (aTag is not null && !string.IsNullOrEmpty(aTag.Coordinates))
                 tags.AddATag(aTag.Coordinates, aTag.PreferredRelay, aTag.CustomMarker);
             return new NEvent(NKind.ZapRequest, tags, message);
         }
@@ -1014,28 +1014,31 @@ namespace NostrSharp.Tools
         /// NIP47: Nostr Wallet Connect
         /// reference: https://github.com/nostr-protocol/nips/blob/master/47.md
         /// </summary>
+        /// <param name="privateKey"></param>
         /// <param name="walletConnect"></param>
         /// <param name="invoiceLN"></param>
         /// <returns></returns>
-        public static NEvent? WalletRequestPayment(WalletConnect walletConnect, string invoiceLN)
+        public static NEvent? WalletRequestPayment(NSec privateKey, WalletConnect walletConnect, string invoiceLN)
         {
-            return WalletRequestPayment(walletConnect, WalletRequest.CreatePayInvoiceRequest(invoiceLN));
+            return WalletRequestPayment(privateKey, walletConnect, WalletRequest.CreatePayInvoiceRequest(invoiceLN));
         }
         /// <summary>
         /// NIP47: Nostr Wallet Connect
         /// reference: https://github.com/nostr-protocol/nips/blob/master/47.md
         /// </summary>
+        /// <param name="privateKey"></param>
         /// <param name="walletConnect"></param>
         /// <param name="parameters"></param>
         /// <returns></returns>
-        public static NEvent? WalletRequestPayment(WalletConnect walletConnect, WalletRequest parameters)
+        public static NEvent? WalletRequestPayment(NSec privateKey, WalletConnect walletConnect, WalletRequest parameters)
         {
             if (walletConnect.WalletNSec is null)
                 return null;
             List<NTag> tags = new();
             tags.AddPTag(walletConnect.WalletPubkey);
-            NEvent ev = new NEvent(NKind.WalletRequest, tags, JsonConvert.SerializeObject(parameters, SerializerCustomSettings.Settings));
-            if (!ev.Encrypt(walletConnect.WalletNSec))
+            string content = JsonConvert.SerializeObject(parameters, SerializerCustomSettings.Settings);
+            NEvent ev = new NEvent(NKind.WalletRequest, tags, content);
+            if (!ev.Encrypt(privateKey, NPub.FromHex(walletConnect.WalletPubkey)))
                 return null;
             return ev;
         }

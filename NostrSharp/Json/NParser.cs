@@ -72,41 +72,43 @@ namespace NostrSharp.Json
                 t = objectType.GenericTypeArguments[0];
 
 
-                var genericList = Activator.CreateInstance(typeof(List<>).MakeGenericType(t));
-                int listIndex = -1;
+                object? genericList = Activator.CreateInstance(typeof(List<>).MakeGenericType(t));
                 for (int i = 0; i < arr.Count; i++)
                 {
                     JToken token = arr[i];
-                    ((IList)genericList).Add(token.ToObject(t));
+                    if (genericList is not null)
+                        ((IList)genericList).Add(token.ToObject(t));
                 }
                 return genericList;
             }
 
             if (objectType.GetProperties().Any(x => GetCachedAttribute<NItemNameAttribute>(x) is not null || GetCachedAttribute<NItemValueAttribute>(x) is not null))
             {
-                var genericList = Activator.CreateInstance(typeof(List<>).MakeGenericType(objectType));
+                object? genericList = Activator.CreateInstance(typeof(List<>).MakeGenericType(objectType));
 
-                foreach (var item in obj)
-                {
-                    index++;
-                    object? nameValueItem = Activator.CreateInstance(objectType, true);
-                    foreach (PropertyInfo p in objectType.GetProperties().OrderBy(x => GetCachedAttribute<NArrayElementAttribute>(x)?.Index))
+                if (obj is not null)
+                    foreach (KeyValuePair<string, JToken?> item in obj)
                     {
-                        if (p is null
-                            || p.PropertyType.IsNotPublic
-                            || !p.CanWrite
-                            || p.CustomAttributes.Any(x => x.AttributeType == typeof(JsonIgnoreAttribute)))
-                            continue;
-                        NItemNameAttribute? nItemName = GetCachedAttribute<NItemNameAttribute>(p);
-                        NItemValueAttribute? nItemValue = GetCachedAttribute<NItemValueAttribute>(p);
+                        index++;
+                        object? nameValueItem = Activator.CreateInstance(objectType, true);
+                        foreach (PropertyInfo p in objectType.GetProperties().OrderBy(x => GetCachedAttribute<NArrayElementAttribute>(x)?.Index))
+                        {
+                            if (p is null
+                                || p.PropertyType.IsNotPublic
+                                || !p.CanWrite
+                                || p.CustomAttributes.Any(x => x.AttributeType == typeof(JsonIgnoreAttribute)))
+                                continue;
+                            NItemNameAttribute? nItemName = GetCachedAttribute<NItemNameAttribute>(p);
+                            NItemValueAttribute? nItemValue = GetCachedAttribute<NItemValueAttribute>(p);
 
-                        if (nItemName is not null)
-                            p.SetValue(nameValueItem, item.Key);
-                        else if (nItemValue is not null)
-                            p.SetValue(nameValueItem, item.Value?.ToObject(p.PropertyType));
+                            if (nItemName is not null)
+                                p.SetValue(nameValueItem, item.Key);
+                            else if (nItemValue is not null)
+                                p.SetValue(nameValueItem, item.Value?.ToObject(p.PropertyType));
+                        }
+                        if (genericList is not null)
+                            ((IList)genericList).Add(nameValueItem);
                     }
-                    ((IList)genericList).Add(nameValueItem);
-                }
 
                 return genericList;
             }
@@ -144,8 +146,7 @@ namespace NostrSharp.Json
                     if (jsonPropAttribute is not null)
                         name = jsonPropAttribute.PropertyName ?? p.Name;
 
-
-                    JToken token = obj[name];
+                    JToken? token = obj[name];
                     if (token is not null)
                     {
                         if ((p.PropertyType == typeof(DateTime?) || p.PropertyType == typeof(DateTime)) && token.Type == JTokenType.Integer)

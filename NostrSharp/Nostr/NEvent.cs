@@ -1,9 +1,9 @@
 ﻿using Newtonsoft.Json;
 using Newtonsoft.Json.Serialization;
 using NostrSharp.Extensions;
+using NostrSharp.Json;
 using NostrSharp.Keys;
 using NostrSharp.Nostr.Enums;
-using NostrSharp.Json;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -156,7 +156,7 @@ namespace NostrSharp.Nostr
             {
                 return NPub.FromHex(PubKey).IsHexSignatureValid(Sig, GetId());
             }
-            catch (Exception ex)
+            catch
             {
                 return false;
             }
@@ -176,7 +176,7 @@ namespace NostrSharp.Nostr
                 using (NEventSign temp = new NEventSign(PubKey, CreatedAt.Value, Kind, Tags, Content))
                     id = JsonConvert.SerializeObject(temp, SerializerCustomSettings.EventSignSettings).GetSha256().ToHexString();
             }
-            catch (Exception ex)
+            catch
             {
                 id = null;
             }
@@ -194,6 +194,8 @@ namespace NostrSharp.Nostr
         /// It derive a shared key between the first "p" tag value of this event and the given private key,
         /// and then encrypt the Content
         /// </summary>
+        /// <param name="senderKey"></param>
+        /// <returns></returns>
         public bool Encrypt(NSec senderKey)
         {
             try
@@ -201,8 +203,26 @@ namespace NostrSharp.Nostr
                 string? firstRecipient = GetFirstProfileTag();
                 if (string.IsNullOrEmpty(firstRecipient))
                     return false;
-                NPub recipientPubkey = NPub.FromHex(firstRecipient);
-                NPub sharedKey = senderKey.DeriveSharedKey(recipientPubkey);
+                return Encrypt(senderKey, NPub.FromHex(firstRecipient));
+            }
+            catch { return false; }
+        }
+        /// <summary>
+        /// It derive a shared key between the given private key and public key,
+        /// and then encrypt the Content
+        /// </summary>
+        /// <param name="senderKey"></param>
+        /// <param name="recipientPubKey"></param>
+        /// <returns></returns>
+        public bool Encrypt(NSec senderKey, NPub recipientPubKey)
+        {
+            try
+            {
+                string? firstRecipient = GetFirstProfileTag();
+                if (string.IsNullOrEmpty(firstRecipient))
+                    Tags.AddPTag(recipientPubKey.Hex);
+
+                NPub sharedKey = senderKey.DeriveSharedKey(recipientPubKey);
 
                 if (!EncryptBase64((Content ?? "").UTF8AsByteArray(), sharedKey, out string? encryptedText, out string? iv))
                     return false;
@@ -218,6 +238,8 @@ namespace NostrSharp.Nostr
             catch { return false; }
         }
         /// <summary>
+        /// It derive a shared key between the first "p" tag value of this event and the given private key,
+        /// and then encrypt the Content
         /// For those platforms that do not support AES-ECB encryption you can override the encryption part
         /// by passing in a Func that has:
         ///     - first input parameter is shared key's EC as byte array
@@ -234,10 +256,37 @@ namespace NostrSharp.Nostr
                 string? firstRecipient = GetFirstProfileTag();
                 if (string.IsNullOrEmpty(firstRecipient))
                     return false;
-                NPub recipientPubkey = NPub.FromHex(firstRecipient);
-                NPub sharedKey = senderKey.DeriveSharedKey(recipientPubkey);
+                return await Encrypt(senderKey, NPub.FromHex(firstRecipient), overrideEncryptionMethod);
+            }
+            catch { return false; }
+        }
+        /// <summary>
+        /// It derive a shared key between the given private key and public key,
+        /// and then encrypt the Content
+        /// For those platforms that do not support AES-ECB encryption you can override the encryption part
+        /// by passing in a Func that has:
+        ///     - first input parameter is shared key's EC as byte array
+        ///     - second input parameter is UTF8 plain text as byte array
+        ///     - output parameter is in this format: encrypted_text + "?iv=" + aes_iv
+        /// </summary>
+        /// <param name="senderKey"></param>
+        /// <param name="overrideEncryptionMethod"></param>
+        /// </summary>
+        /// <param name="senderKey"></param>
+        /// <param name="recipientPubKey"></param>
+        /// <param name="overrideEncryptionMethod"></param>
+        /// <returns></returns>
+        public async Task<bool> Encrypt(NSec senderKey, NPub recipientPubKey, Func<byte[], byte[], Task<string?>> overrideEncryptionMethod)
+        {
+            try
+            {
+                string? firstRecipient = GetFirstProfileTag();
+                if (string.IsNullOrEmpty(firstRecipient))
+                    Tags.AddPTag(recipientPubKey.Hex);
 
-                string encryptedTextPlusIV = await overrideEncryptionMethod(sharedKey.Ec.ToBytes(), (Content ?? "").UTF8AsByteArray());
+                NPub sharedKey = senderKey.DeriveSharedKey(recipientPubKey);
+
+                string? encryptedTextPlusIV = await overrideEncryptionMethod(sharedKey.Ec.ToBytes(), (Content ?? "").UTF8AsByteArray());
                 if (string.IsNullOrEmpty(encryptedTextPlusIV) || !encryptedTextPlusIV.Contains(IvSeparator))
                     return false;
 
@@ -247,11 +296,15 @@ namespace NostrSharp.Nostr
                 Content = encryptedTextPlusIV;
                 return true;
             }
-            catch (Exception ex) { return false; }
+            catch { return false; }
         }
+
         /// <summary>
         /// Decrypt content text using the given private key
         /// </summary>
+        /// <param name="privateKey"></param>
+        /// <returns></returns>
+        /// <exception cref="InvalidOperationException"></exception>
         public string? Decrypt(NSec privateKey)
         {
             if (PubKey is null)
@@ -277,6 +330,26 @@ namespace NostrSharp.Nostr
             return DecryptBase64(encryptedContent, iv, privateKey.DeriveSharedKey(NPub.FromHex(targetPubkeyHex)));
         }
         /// <summary>
+        /// Decrypt content text using the given private key and public key
+        /// </summary>
+        /// <param name="privateKey"></param>
+        /// <param name="publicKey"></param>
+        /// <returns></returns>
+        /// <exception cref="InvalidOperationException"></exception>
+        public string? Decrypt(NSec privateKey, NPub publicKey)
+        {
+            if (publicKey is null)
+                throw new InvalidOperationException("NPub is not specified, can't decrypt");
+
+            GetEncryptedData(out string? encryptedContent, out string? iv);
+            if (string.IsNullOrEmpty(encryptedContent) || string.IsNullOrWhiteSpace(encryptedContent))
+                throw new InvalidOperationException("Encrypted content is null, can't decrypt");
+            if (string.IsNullOrEmpty(iv) || string.IsNullOrWhiteSpace(iv))
+                throw new InvalidOperationException("Initialization vector is null, can't decrypt");
+            return DecryptBase64(encryptedContent, iv, privateKey.DeriveSharedKey(publicKey));
+        }
+        /// <summary>
+        /// Decrypt the content using a shared key between the given private key and the first "p" tag value
         /// For those platforms that do not support AES-ECB decryption you can override the decryption part
         /// by passing in a Func that has:
         ///     - first input parameter is shared key's EC as byte array
@@ -312,6 +385,36 @@ namespace NostrSharp.Nostr
 
             return await overrideDecryptionMethod(privateKey.DeriveSharedKey(NPub.FromHex(targetPubkeyHex)).Ec.ToBytes(), Convert.FromBase64String(iv), Convert.FromBase64String(encryptedContent));
         }
+        /// <summary>
+        /// Decrypt the content using a shared key between the given private key and public key.
+        /// For those platforms that do not support AES-ECB decryption you can override the decryption part
+        /// by passing in a Func that has:
+        ///     - first input parameter is shared key's EC as byte array
+        ///     - second input parameter is IV as byte array
+        ///     - third input parameter is encrypted text as byte array
+        ///     - output parameter is in the plain text decrypted string
+        /// </summary>
+        /// <param name="privateKey"></param>
+        /// <param name="overrideDecryptionMethod"></param>
+        /// <returns></returns>
+        /// <exception cref="InvalidOperationException"></exception>
+        public async Task<string?> Decrypt(NSec privateKey, NPub publicKey, Func<byte[], byte[], byte[], Task<string?>> overrideDecryptionMethod)
+        {
+            if (publicKey is null)
+                throw new InvalidOperationException("NPub is not specified, can't decrypt");
+            string? recipientPubkey = GetFirstProfileTag();
+            if (string.IsNullOrEmpty(recipientPubkey) || string.IsNullOrWhiteSpace(recipientPubkey))
+                throw new InvalidOperationException("Recipient pubkey is not specified, can't decrypt");
+            GetEncryptedData(out string? encryptedContent, out string? iv);
+            if (string.IsNullOrEmpty(encryptedContent) || string.IsNullOrWhiteSpace(encryptedContent))
+                throw new InvalidOperationException("Encrypted content is null, can't decrypt");
+            if (string.IsNullOrEmpty(iv) || string.IsNullOrWhiteSpace(iv))
+                throw new InvalidOperationException("Initialization vector is null, can't decrypt");
+
+            return await overrideDecryptionMethod(privateKey.DeriveSharedKey(publicKey).Ec.ToBytes(), Convert.FromBase64String(iv), Convert.FromBase64String(encryptedContent));
+        }
+
+
         private void GetEncryptedData(out string? encriptedContent, out string? iv)
         {
             encriptedContent = null;
@@ -323,7 +426,7 @@ namespace NostrSharp.Nostr
             string[] split = Content.Split(IvSeparator);
             encriptedContent = split.Length >= 1 ? split[0] : null;
             iv = split.Length >= 2 ? split[1] : null;
-            split = null;
+            split = new string[0];
         }
 
 
@@ -342,7 +445,7 @@ namespace NostrSharp.Nostr
                 iv = Convert.ToBase64String(aes.IV);
                 return true;
             }
-            catch (Exception ex)
+            catch
             {
                 return false;
             }
